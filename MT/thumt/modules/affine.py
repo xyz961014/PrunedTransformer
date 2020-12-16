@@ -45,3 +45,44 @@ class Affine(Module):
         return 'in_features={}, out_features={}, bias={}'.format(
             self.in_features, self.out_features, self.bias is not None
         )
+
+class WeightedAffine(Module):
+
+    def __init__(self, num_heads, head_size, out_features, bias=True, name="weighted_affine"):
+        super().__init__(name=name)
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.out_features = out_features
+
+        with utils.scope(name):
+            self.weight = nn.Parameter(torch.Tensor(num_heads, out_features, head_size))
+            self.add_name(self.weight, "weight")
+            if bias:
+                self.bias = nn.Parameter(torch.Tensor(out_features))
+                self.add_name(self.bias, "bias")
+            else:
+                self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input):
+        if input.dim() == 3:
+            output = input.matmul(weight.transpose(1, 2).reshape(self.out_features, -1))
+        elif input.dim() == 4:
+            output = torch.einsum("bnld,nod->bnlo", input, self.weight)
+        if self.bias is not None:
+            output += self.bias
+        ret = output
+        return ret
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
