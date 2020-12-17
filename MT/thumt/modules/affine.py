@@ -73,16 +73,14 @@ class WeightedAffine(Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
-        if input.dim() == 3:
-            output = input.matmul(weight.transpose(1, 2).reshape(self.out_features, -1))
-        elif input.dim() == 4:
-            output = torch.einsum("bnld,nod->bnlo", input, self.weight)
+        assert input.dim() == 4
+        output = torch.einsum("bnld,nod->bnlo", input, self.weight)
         if self.bias is not None:
             output += self.bias
         ret = output
         return ret
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, self.bias is not None
+        return 'num_heads={}, head_size={}, out_features={}, bias={}'.format(
+            self.num_heads, self.head_size, self.out_features, self.bias is not None
         )

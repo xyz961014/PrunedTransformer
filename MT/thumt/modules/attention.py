@@ -278,14 +278,15 @@ class MultiHeadAdditiveAttention(MultiHeadAttentionBase):
 
 class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_weight=True,
+    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, enable_alpha=True,
                  name="weighted_multihead_attention"):
         super().__init__(name=name)
 
         self.num_heads = num_heads
         self.hidden_size = hidden_size
         self.dropout = dropout
-        self.enable_weight = enable_weight
+        self.enable_kappa = enable_kappa
+        self.enable_alpha = enable_alpha
 
         head_size = hidden_size // num_heads
 
@@ -296,9 +297,13 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
                                       name="k_transform")
             self.v_transform = Affine(hidden_size, hidden_size,
                                       name="v_transform")
-            self.o_transform = WeightedAffine(num_heads, head_size, hidden_size,
-                                      name="o_transform")
-            if enable_weight:
+            if enable_alpha:
+                self.o_transform = WeightedAffine(num_heads, head_size, hidden_size,
+                                          name="o_transform")
+            else:
+                self.o_transform = Affine(hidden_size, hidden_size,
+                                          name="o_transform")
+            if enable_kappa:
                 self.kappa = nn.Parameter(torch.empty(num_heads))
                 self.add_name(self.kappa, "kappa")
 
@@ -347,11 +352,19 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
         x = torch.matmul(weights, vh)
 
-        if self.enable_weight:
+        if self.enable_kappa and self.enable_alpha:
             # combine kappa weights
             normalized_kappa = F.softmax(self.kappa, dim=0)
             x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
             output = self.o_transform(x)
+        elif not self.enable_kappa and self.enable_alpha:
+            # do not combine heads
+            output = self.o_transform(x)
+        elif self.enable_kappa and not self.enable_alpha:
+            # combine kappa weights and combine heads
+            normalized_kappa = F.softmax(self.kappa, dim=0)
+            x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
+            output = self.o_transform(self.combine_heads(x))
         else:
             # combine heads
             output = self.o_transform(self.combine_heads(x))
@@ -372,7 +385,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             nn.init.constant_(self.k_transform.bias, 0.0)
             nn.init.constant_(self.v_transform.bias, 0.0)
             nn.init.constant_(self.o_transform.bias, 0.0)
-            if self.enable_weight:
+            if self.enable_kappa:
                 nn.init.constant_(self.kappa, 0.0)
         else:
             raise ValueError("Unknown initializer %d" % initializer)

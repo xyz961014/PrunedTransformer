@@ -15,7 +15,7 @@ import thumt.modules as modules
 
 class AttentionSubLayer(modules.Module):
 
-    def __init__(self, params, name="weighted_attention"):
+    def __init__(self, params, name="attention"):
         super(AttentionSubLayer, self).__init__(name=name)
 
         self.dropout = params.residual_dropout
@@ -55,12 +55,14 @@ class WeightedAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.enable_alpha = params.enable_alpha
 
         with utils.scope(name):
             self.attention = modules.WeightedMultiHeadAttention(params.hidden_size, 
                                                                 params.num_heads, 
                                                                 params.attention_dropout,
-                                                                enable_weight=params.enable_kappa)
+                                                                enable_kappa=params.enable_kappa,
+                                                                enable_alpha=params.enable_alpha)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
     def forward(self, x, bias, memory=None, state=None):
@@ -78,10 +80,16 @@ class WeightedAttentionSubLayer(modules.Module):
 
         y = F.dropout(y, self.dropout, self.training)
 
-        if self.normalization == "before":
-            return x.unsqueeze(1) + y
+        if self.enable_alpha:
+            if self.normalization == "before":
+                return x.unsqueeze(1) + y
+            else:
+                return self.layer_norm(x.unsqueeze(1) + y)
         else:
-            return self.layer_norm(x.unsqueeze(1) + y)
+            if self.normalization == "before":
+                return x + y
+            else:
+                return self.layer_norm(x + y)
 
 
 class WeightedFFNSubLayer(modules.Module):
@@ -91,13 +99,14 @@ class WeightedFFNSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.enable_alpha = params.enable_alpha
 
         with utils.scope(name):
             self.ffn_layer = modules.WeightedFeedForward(params.hidden_size,
                                                          params.filter_size,
                                                          params.num_heads,
                                                          dropout=params.relu_dropout,
-                                                         enable_weight=params.enable_alpha)
+                                                         enable_alpha=params.enable_alpha)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
     def forward(self, x):
@@ -109,10 +118,16 @@ class WeightedFFNSubLayer(modules.Module):
         y = self.ffn_layer(y)
         y = F.dropout(y, self.dropout, self.training)
 
-        if self.normalization == "before":
-            return x.sum(dim=1) + y
+        if self.enable_alpha:
+            if self.normalization == "before":
+                return x.sum(dim=1) + y
+            else:
+                return self.layer_norm(x.sum(dim=1) + y)
         else:
-            return self.layer_norm(x.sum(dim=1) + y)
+            if self.normalization == "before":
+                return x + y
+            else:
+                return self.layer_norm(x + y)
 
 
 class WeightedTransformerEncoderLayer(modules.Module):

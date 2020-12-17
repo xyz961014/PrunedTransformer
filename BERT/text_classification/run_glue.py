@@ -136,6 +136,14 @@ class ModelArguments:
         default="transformer",
         metadata={"help": "What model to apply in BertModel. Choices: transformer, weighted_transformer"},
     )
+    enable_kappa: bool = field(
+        default=True,
+        metadata={"help": "Enable Attention Head Weights kappa in WeightedTransformer"},
+    )
+    enable_alpha: bool = field(
+        default=True,
+        metadata={"help": "Enable MLP Weights kappa in WeightedTransformer"},
+    )
 
 
 def main():
@@ -242,6 +250,8 @@ def main():
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
         model=model_args.model,
+        enable_kappa=model_args.enable_kappa,
+        enable_alpha=model_args.enable_alpha,
         return_unused_kwargs=True
     )
     config = add_attr_from_dict(config, extra_attr)

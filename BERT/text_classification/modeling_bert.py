@@ -26,6 +26,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
+import torch.nn.functional as F
 
 from transformers.activations import ACT2FN
 from transformers.file_utils import (
@@ -54,6 +55,7 @@ from transformers.modeling_utils import (
 )
 from transformers.utils import logging
 from transformers import BertConfig
+from utils import WeightedLinear
 
 
 logger = logging.get_logger(__name__)
@@ -311,6 +313,22 @@ class BertSelfOutput(nn.Module):
         return hidden_states
 
 
+class WeightedBertSelfOutput(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.dense = WeightedLinear(self.num_attention_heads, self.attention_head_size, config.hidden_size)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states + input_tensor.unsqueeze(2))
+        return hidden_states
+
+
 class BertAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -358,6 +376,86 @@ class BertAttention(nn.Module):
         return outputs
 
 
+class WeightedBertAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.self = BertSelfAttention(config)
+        if config.enable_alpha:
+            self.output = WeightedBertSelfOutput(config)
+        else:
+            self.output = BertSelfOutput(config)
+        self.pruned_heads = set()
+        self.enable_alpha = config.enable_alpha
+        self.enable_kappa = config.enable_kappa
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+
+        if config.enable_kappa:
+            self.kappa = nn.Parameter(torch.empty(config.num_attention_heads))
+            nn.init.constant_(self.kappa, 0.0)
+
+    def prune_heads(self, heads):
+        if len(heads) == 0:
+            return
+        heads, index = find_pruneable_heads_and_indices(
+            heads, self.self.num_attention_heads, self.self.attention_head_size, self.pruned_heads
+        )
+
+        # Prune linear layers
+        self.self.query = prune_linear_layer(self.self.query, index)
+        self.self.key = prune_linear_layer(self.self.key, index)
+        self.self.value = prune_linear_layer(self.self.value, index)
+        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
+
+        # Update hyper params and store pruned heads
+        self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
+        self.self.all_head_size = self.self.attention_head_size * self.self.num_attention_heads
+        self.pruned_heads = self.pruned_heads.union(heads)
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        output_attentions=False,
+    ):
+        self_outputs = self.self(
+            hidden_states,
+            attention_mask,
+            head_mask,
+            encoder_hidden_states,
+            encoder_attention_mask,
+            output_attentions,
+        )
+        output = self_outputs[0]
+        if self.enable_kappa and self.enable_alpha:
+            # split heads and apply kappa weights
+            batch_size = hidden_states.size(0)
+            seq_len = hidden_states.size(1)
+            output = output.reshape(batch_size, seq_len, self.num_attention_heads, self.attention_head_size)
+            normalized_kappa = F.softmax(self.kappa)
+            output = torch.einsum("n,blnd->blnd", normalized_kappa, output)
+        elif not self.enable_kappa and self.enable_alpha:
+            # just split heads
+            batch_size = hidden_states.size(0)
+            seq_len = hidden_states.size(1)
+            output = output.reshape(batch_size, seq_len, self.num_attention_heads, self.attention_head_size)
+        elif self.enable_kappa and not self.enable_alpha:
+            # split heads and apply kappa weights and concat
+            batch_size = hidden_states.size(0)
+            seq_len = hidden_states.size(1)
+            output = output.reshape(batch_size, seq_len, self.num_attention_heads, self.attention_head_size)
+            normalized_kappa = F.softmax(self.kappa)
+            output = torch.einsum("n,blnd->blnd", normalized_kappa, output)
+            output = output.reshape(batch_size, seq_len, self.num_attention_heads * self.attention_head_size)
+
+        attention_output = self.output(output, hidden_states)
+        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
+        return outputs
+
+
 class BertIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -384,6 +482,30 @@ class BertOutput(nn.Module):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        return hidden_states
+
+
+class WeightedBertOutput(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.enable_alpha = config.enable_alpha
+        
+        if config.enable_alpha:
+            self.alpha = nn.Parameter(torch.empty(config.num_attention_heads))
+            nn.init.constant_(self.alpha, 0.0)
+
+    def forward(self, hidden_states, input_tensor):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        if self.enable_alpha:
+            normalized_alpha = F.softmax(self.alpha)
+            hidden_states = torch.einsum("n,blnd->bld", normalized_alpha, hidden_states)
+            hidden_states = self.LayerNorm(hidden_states + input_tensor.sum(dim=2))
+        else:
+            hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
 
@@ -451,14 +573,14 @@ class WeightedBertLayer(nn.Module):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = BertAttention(config)
+        self.attention = WeightedBertAttention(config)
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
         if self.add_cross_attention:
             assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
-            self.crossattention = BertAttention(config)
+            self.crossattention = WeightedBertAttention(config)
         self.intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
+        self.output = WeightedBertOutput(config)
 
     def forward(
         self,
@@ -1590,7 +1712,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         super().__init__(config)
         self.num_labels = config.num_labels
 
-        self.bert = BertModel(config)
+        model_cls = get_model(config.model)
+        self.bert = model_cls(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
