@@ -239,7 +239,7 @@ def main(args):
 
         all_outputs = []
 
-        if dist.rank() == 0:
+        if dist.get_rank() == 0:
             pbar = tqdm(total=total_len)
             pbar.set_description("Translating to {}".format(args.output))
 

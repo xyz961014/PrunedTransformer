@@ -40,6 +40,7 @@ from transformers import (
 
 from transformers.trainer_utils import is_main_process
 from modeling_bert import BertForSequenceClassification
+from utils import add_attr_from_dict
 
 task_to_keys = {
     "cola": ("sentence", None),
@@ -130,6 +131,10 @@ class ModelArguments:
     use_fast_tokenizer: bool = field(
         default=True,
         metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
+    )
+    model: str = field(
+        default="transformer",
+        metadata={"help": "What model to apply in BertModel. Choices: transformer, weighted_transformer"},
     )
 
 
@@ -231,12 +236,15 @@ def main():
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    config = BertConfig.from_pretrained(
+    config, extra_attr = BertConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
+        model=model_args.model,
+        return_unused_kwargs=True
     )
+    config = add_attr_from_dict(config, extra_attr)
     tokenizer = BertTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -248,7 +256,7 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
     )
-
+    
     # Preprocessing the datasets
     if data_args.task_name is not None:
         sentence1_key, sentence2_key = task_to_keys[data_args.task_name]
