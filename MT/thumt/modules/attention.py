@@ -287,6 +287,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
         self.dropout = dropout
         self.enable_kappa = enable_kappa
         self.enable_alpha = enable_alpha
+        self.additional_params = []
 
         head_size = hidden_size // num_heads
 
@@ -306,6 +307,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             if enable_kappa:
                 self.kappa = nn.Parameter(torch.empty(num_heads))
                 self.add_name(self.kappa, "kappa")
+                self.additional_params.append(self.kappa)
 
 
         self.reset_parameters()

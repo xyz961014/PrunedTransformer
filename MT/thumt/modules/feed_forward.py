@@ -56,6 +56,7 @@ class WeightedFeedForward(Module):
         self.output_size = output_size or input_size
         self.dropout = dropout
         self.enable_alpha = enable_alpha
+        self.additional_params = []
 
         with utils.scope(name):
             self.input_transform = Affine(input_size, hidden_size,
@@ -65,6 +66,7 @@ class WeightedFeedForward(Module):
             if enable_alpha:
                 self.alpha = nn.Parameter(torch.empty(num_heads))
                 self.add_name(self.alpha, "alpha")
+                self.additional_params.append(self.alpha)
 
         self.reset_parameters()
 

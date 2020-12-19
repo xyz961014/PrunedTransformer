@@ -65,6 +65,8 @@ class WeightedAttentionSubLayer(modules.Module):
                                                                 enable_alpha=params.enable_alpha)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
+        self.additional_params = self.attention.additional_params
+
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
             y = self.layer_norm(x)
@@ -109,6 +111,8 @@ class WeightedFFNSubLayer(modules.Module):
                                                          enable_alpha=params.enable_alpha)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
+        self.additional_params = self.ffn_layer.additional_params
+
     def forward(self, x):
         if self.normalization == "before":
             y = self.layer_norm(x)
@@ -139,6 +143,8 @@ class WeightedTransformerEncoderLayer(modules.Module):
             self.self_attention = WeightedAttentionSubLayer(params)
             self.feed_forward = WeightedFFNSubLayer(params)
 
+        self.additional_params = self.self_attention.additional_params + self.feed_forward.additional_params
+
     def forward(self, x, bias):
         x = self.self_attention(x, bias)
         x = self.feed_forward(x)
@@ -156,6 +162,8 @@ class WeightedTransformerDecoderLayer(modules.Module):
             self.encdec_attention = WeightedAttentionSubLayer(params,
                                                               name="encdec_attention")
             self.feed_forward = WeightedFFNSubLayer(params)
+
+        self.additional_params = self.encdec_attention.additional_params + self.feed_forward.additional_params
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         x = self.self_attention(x, attn_bias, state=state)
@@ -179,6 +187,10 @@ class WeightedTransformerEncoder(modules.Module):
                 self.layer_norm = modules.LayerNorm(params.hidden_size)
             else:
                 self.layer_norm = None
+
+        self.additional_params = []
+        for layer in self.layers:
+            self.additional_params += layer.additional_params
 
     def forward(self, x, bias):
         for layer in self.layers:
@@ -206,6 +218,10 @@ class WeightedTransformerDecoder(modules.Module):
                 self.layer_norm = modules.LayerNorm(params.hidden_size)
             else:
                 self.layer_norm = None
+
+        self.additional_params = []
+        for layer in self.layers:
+            self.additional_params += layer.additional_params
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
@@ -239,6 +255,7 @@ class WeightedTransformer(modules.Module):
         self.hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
+        self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
 
     def build_embedding(self, params):
