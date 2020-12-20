@@ -387,6 +387,7 @@ class WeightedBertAttention(nn.Module):
         self.pruned_heads = set()
         self.enable_alpha = config.enable_alpha
         self.enable_kappa = config.enable_kappa
+        self.expand_kappa_norm = config.expand_kappa_norm
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
 
@@ -436,6 +437,8 @@ class WeightedBertAttention(nn.Module):
             seq_len = hidden_states.size(1)
             output = output.reshape(batch_size, seq_len, self.num_attention_heads, self.attention_head_size)
             normalized_kappa = F.softmax(self.kappa, dim=0)
+            if self.expand_kappa_norm:
+                normalized_kappa = normalized_kappa * self.num_attention_heads
             output = torch.einsum("n,blnd->blnd", normalized_kappa, output)
         elif not self.enable_kappa and self.enable_alpha:
             # just split heads
@@ -448,6 +451,8 @@ class WeightedBertAttention(nn.Module):
             seq_len = hidden_states.size(1)
             output = output.reshape(batch_size, seq_len, self.num_attention_heads, self.attention_head_size)
             normalized_kappa = F.softmax(self.kappa, dim=0)
+            if self.expand_kappa_norm:
+                normalized_kappa = normalized_kappa * self.num_attention_heads
             output = torch.einsum("n,blnd->blnd", normalized_kappa, output)
             output = output.reshape(batch_size, seq_len, self.num_attention_heads * self.attention_head_size)
 
@@ -491,7 +496,9 @@ class WeightedBertOutput(nn.Module):
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.num_attention_heads = config.num_attention_heads
         self.enable_alpha = config.enable_alpha
+        self.expand_alpha_norm = config.expand_alpha_norm
         
         if config.enable_alpha:
             self.alpha = nn.Parameter(torch.empty(config.num_attention_heads))
@@ -502,6 +509,8 @@ class WeightedBertOutput(nn.Module):
         hidden_states = self.dropout(hidden_states)
         if self.enable_alpha:
             normalized_alpha = F.softmax(self.alpha, dim=0)
+            if self.expand_alpha_norm:
+                normalized_alpha = normalized_alpha * self.num_attention_heads
             hidden_states = torch.einsum("n,blnd->bld", normalized_alpha, hidden_states)
             hidden_states = self.LayerNorm(hidden_states + input_tensor.sum(dim=2))
         else:

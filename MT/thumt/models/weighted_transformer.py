@@ -62,7 +62,8 @@ class WeightedAttentionSubLayer(modules.Module):
                                                                 params.num_heads, 
                                                                 params.attention_dropout,
                                                                 enable_kappa=params.enable_kappa,
-                                                                enable_alpha=params.enable_alpha)
+                                                                enable_alpha=params.enable_alpha,
+                                                                expand_kappa_norm=params.expand_kappa_norm)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
@@ -108,7 +109,8 @@ class WeightedFFNSubLayer(modules.Module):
                                                          params.filter_size,
                                                          params.num_heads,
                                                          dropout=params.relu_dropout,
-                                                         enable_alpha=params.enable_alpha)
+                                                         enable_alpha=params.enable_alpha,
+                                                         expand_alpha_norm=params.expand_alpha_norm)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.ffn_layer.additional_params
@@ -433,6 +435,8 @@ class WeightedTransformer(modules.Module):
             shared_source_target_embedding=False,
             enable_alpha=True,
             enable_kappa=True,
+            expand_alpha_norm=False,
+            expand_kappa_norm=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

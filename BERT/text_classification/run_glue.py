@@ -144,6 +144,14 @@ class ModelArguments:
         default=True,
         metadata={"help": "Enable MLP Weights kappa in WeightedTransformer"},
     )
+    expand_kappa_norm: bool = field(
+        default=False,
+        metadata={"help": "Expand kappa norm to num_head in WeightedTransformer"},
+    )
+    expand_alpha_norm: bool = field(
+        default=False,
+        metadata={"help": "Expand alpha norm to num_head in WeightedTransformer"},
+    )
 
 
 def main():
@@ -244,17 +252,13 @@ def main():
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    config, extra_attr = BertConfig.from_pretrained(
+    config = BertConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
-        model=model_args.model,
-        enable_kappa=model_args.enable_kappa,
-        enable_alpha=model_args.enable_alpha,
-        return_unused_kwargs=True
     )
-    config = add_attr_from_dict(config, extra_attr)
+    config = add_attr_from_dict(config, model_args.__dict__)
     tokenizer = BertTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
