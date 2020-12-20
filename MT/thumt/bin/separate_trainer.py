@@ -524,7 +524,7 @@ def main(args):
 
     additional_schedule = get_learning_rate_schedule(params, additional=True)
     additional_clipper = get_clipper(params, additional=True)
-    additional_optimizer = get_optimizer(params, schedule, clipper, additional=True)
+    additional_optimizer = get_optimizer(params, additional_schedule, additional_clipper, additional=True)
 
     if args.half:
         additional_optimizer = optimizers.LossScalingOptimizer(additional_optimizer)
