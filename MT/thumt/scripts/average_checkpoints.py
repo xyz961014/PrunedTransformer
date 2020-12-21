@@ -15,7 +15,7 @@ import shutil
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Create vocabulary")
+    parser = argparse.ArgumentParser(description="Average checkpoints")
 
     parser.add_argument("--path", help="checkpoint directory")
     parser.add_argument("--output", default="average",
