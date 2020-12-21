@@ -12,6 +12,7 @@ import os
 import re
 import six
 import torch
+import glob
 
 import thumt.data as data
 import thumt.models as models
@@ -32,6 +33,8 @@ def parse_args():
                         help="Path to trained checkpoints.")
     parser.add_argument("--vocabulary", type=str, nargs=2, required=True,
                         help="Path to source and target vocabulary.")
+    parser.add_argument("--param_json", type=str, default="",
+                        help="Path to parameter json file.")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -45,6 +48,8 @@ def parse_args():
                         help="Attention Head analyze function")
     parser.add_argument("--pattern", type=str, default="alpha|kappa",
                         help="pattern to find related parameter in visualize_head_selection")
+    parser.add_argument("--env", type=str, default="",
+                        help="env for visdom")
 
     return parser.parse_args()
 
@@ -90,9 +95,10 @@ def merge_params(params1, params2):
     return params
 
 
-def import_params(model_dir, model_name, params):
+def import_params(model_dir, model_name, params, m_name=""):
     model_dir = os.path.abspath(model_dir)
-    m_name = os.path.join(model_dir, model_name + ".json")
+    if not m_name:
+        m_name = os.path.join(model_dir, model_name + ".json")
 
     if not os.path.exists(m_name):
         return params
@@ -129,11 +135,18 @@ def main(args):
     model_cls = models.get_model(args.model)
     params = default_params()
     params = merge_params(params, model_cls.default_params())
-    params = import_params(args.checkpoint, args.model, params)
+    params = import_params(args.checkpoint, args.model, params, args.param_json)
     params = override_params(params, args)
 
-    checkpoint = utils.latest_checkpoint(args.checkpoint)
-    env_name = re.sub("-", "", checkpoint).split("/")[-1].split(".")[0]
+    if os.path.isdir(args.checkpoint):
+        checkpoint = utils.latest_checkpoint(args.checkpoint)
+    else:
+        checkpoint = args.checkpoint
+
+    if not args.env:
+        env_name = re.sub("-|/", "", checkpoint)
+    else:
+        env_name = args.env
 
     torch.set_default_tensor_type(torch.FloatTensor)
 
