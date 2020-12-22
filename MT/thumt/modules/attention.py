@@ -291,6 +291,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
         self.additional_params = []
 
         head_size = hidden_size // num_heads
+        self.head_size = head_size
 
         with utils.scope(name):
             self.q_transform = Affine(hidden_size, hidden_size,

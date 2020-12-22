@@ -274,3 +274,5 @@ def evaluate(model, sorted_key, dataset, base_dir, references, params):
         best_score = records[0][1]
         print("Best score at step %d: %f" % (global_step, best_score))
         print("-" * 90)
+
+    return score

@@ -55,7 +55,7 @@ class WeightedAffine(Module):
         self.out_features = out_features
 
         with utils.scope(name):
-            self.weight = nn.Parameter(torch.Tensor(num_heads, out_features, head_size))
+            self.weight = nn.Parameter(torch.Tensor(out_features, num_heads * head_size))
             self.add_name(self.weight, "weight")
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(out_features))
@@ -74,7 +74,7 @@ class WeightedAffine(Module):
 
     def forward(self, input):
         assert input.dim() == 4
-        output = torch.einsum("bnld,nod->bnlo", input, self.weight)
+        output = torch.einsum("bnld,ond->bnlo", input, self.weight.reshape(self.out_features, self.num_heads, self.head_size))
         if self.bias is not None:
             output += self.bias
         ret = output

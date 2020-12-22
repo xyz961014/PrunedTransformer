@@ -11,8 +11,11 @@ import logging
 import os
 import re
 import six
-import torch
+import socket
 import glob
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
 
 import thumt.data as data
 import thumt.models as models
@@ -33,8 +36,6 @@ def parse_args():
                         help="Path to trained checkpoints.")
     parser.add_argument("--vocabulary", type=str, nargs=2, required=True,
                         help="Path to source and target vocabulary.")
-    parser.add_argument("--param_json", type=str, default="",
-                        help="Path to parameter json file.")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -44,10 +45,13 @@ def parse_args():
 
     # analyze function
     parser.add_argument("--function", type=str, default="visualize_head_selection", 
-                        choices=["visualize_head_selection"],
+                        choices=["visualize_head_selection", "head_importance_score"],
                         help="Attention Head analyze function")
     parser.add_argument("--pattern", type=str, default="alpha|kappa",
                         help="pattern to find related parameter in visualize_head_selection")
+    parser.add_argument("--head_importance_method", type=str, default="drop_one",
+                        choices=["drop_one"],
+                        help="method to evaluate head importance in head_importance_score")
     parser.add_argument("--env", type=str, default="",
                         help="env for visdom")
 
@@ -56,8 +60,8 @@ def parse_args():
 
 def default_params():
     params = utils.HParams(
-        input=None,
-        output=None,
+        input=["", ""],
+        output="",
         vocabulary=None,
         # vocabulary specific
         pad="<pad>",
@@ -72,6 +76,8 @@ def default_params():
         decode_ratio=1.0,
         decode_length=50,
         decode_batch_size=32,
+        # evaluate
+        keep_top_checkpoint_max=5,
     )
 
     return params
@@ -95,18 +101,25 @@ def merge_params(params1, params2):
     return params
 
 
-def import_params(model_dir, model_name, params, m_name=""):
-    model_dir = os.path.abspath(model_dir)
-    if not m_name:
-        m_name = os.path.join(model_dir, model_name + ".json")
+def import_params(model_dir, model_name, params):
+    if os.path.isdir(model_dir):
+        model_dir = os.path.abspath(model_dir)
+    else:
+        model_dir = os.path.abspath(os.path.dirname(model_dir))
+    p_name = os.path.join(model_dir, "params.json")
+    m_name = os.path.join(model_dir, model_name + ".json")
 
-    if not os.path.exists(m_name):
-        return params
+    if os.path.exists(p_name):
+        with open(p_name) as fd:
+            logging.info("Restoring hyper parameters from %s" % p_name)
+            json_str = fd.readline()
+            params.parse_json(json_str)
 
-    with open(m_name) as fd:
-        logging.info("Restoring model parameters from %s" % m_name)
-        json_str = fd.readline()
-        params.parse_json(json_str)
+    if os.path.exists(m_name):
+        with open(m_name) as fd:
+            logging.info("Restoring model parameters from %s" % m_name)
+            json_str = fd.readline()
+            params.parse_json(json_str)
 
     return params
 
@@ -129,14 +142,42 @@ def override_params(params, args):
 
     return params
 
+def load_references(pattern):
+    if not pattern:
+        return None
+
+    files = glob.glob(pattern)
+    references = []
+
+    for name in files:
+        ref = []
+        with open(name, "rb") as fd:
+            for line in fd:
+                items = line.strip().split()
+                ref.append(items)
+        references.append(ref)
+
+    return list(zip(*references))
+
 
 def main(args):
     # Load configs
     model_cls = models.get_model(args.model)
     params = default_params()
     params = merge_params(params, model_cls.default_params())
-    params = import_params(args.checkpoint, args.model, params, args.param_json)
+    params = import_params(args.checkpoint, args.model, params)
     params = override_params(params, args)
+
+    # Initialize distributed utility
+    dist.init_process_group("nccl", init_method=args.url,
+                            rank=args.local_rank,
+                            world_size=len(params.device_list))
+    torch.cuda.set_device(params.device_list[args.local_rank])
+    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+
+
+    sorted_key, eval_dataset = data.get_dataset(args.input[1], "infer", params)
+    references = load_references(args.input[1])
 
     if os.path.isdir(args.checkpoint):
         checkpoint = utils.latest_checkpoint(args.checkpoint)
@@ -148,8 +189,6 @@ def main(args):
     else:
         env_name = args.env
 
-    torch.set_default_tensor_type(torch.FloatTensor)
-
     # Create model
     with torch.no_grad():
 
@@ -159,7 +198,25 @@ def main(args):
         model.load_state_dict(torch.load(checkpoint, map_location="cpu")["model"])
 
         if args.function == "visualize_head_selection":
-            visualize_head_selection(model, args.pattern, env=env_name)
+            def compute_head_selection_weight(var, name):
+                if re.search("kappa", name):
+                    if params.expand_kappa_norm:
+                        return F.softmax(var, dim=0) * params.num_heads
+                    else:
+                        return F.softmax(var, dim=0)
+                elif re.search("alpha", name):
+                    if params.expand_alpha_norm:
+                        return F.softmax(var, dim=0) * params.num_heads
+                    else:
+                        return F.softmax(var, dim=0)
+                else:
+                    return F.softmax(var, dim=0)
+
+            visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
+
+        elif args.function == "head_importance_score":
+            head_scores = utils.head_importance_score(model, args.head_importance_method, 
+                                                      sorted_key, eval_dataset, references, params)
 
 
 # Wrap main function
@@ -171,6 +228,14 @@ def process_fn(rank, args):
 
 def cli_main():
     parsed_args = parse_args()
+
+    # Pick a free port
+    with socket.socket() as s:
+        s.bind(("localhost", 0))
+        port = s.getsockname()[1]
+        url = "tcp://localhost:" + str(port)
+        parsed_args.url = url
+
     process_fn(0, parsed_args)
 
 

@@ -12,6 +12,7 @@ import torch.nn.functional as F
 
 import thumt.utils as utils
 import thumt.modules as modules
+from thumt.utils import prune_linear_layer, prune_vector
 
 class AttentionSubLayer(modules.Module):
 
@@ -20,12 +21,34 @@ class AttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.pruned_heads = set()
 
         with utils.scope(name):
             self.attention = modules.MultiHeadAttention(params.hidden_size, 
                                                         params.num_heads, 
                                                         params.attention_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
+
+    def prune_heads(self, heads, pruned_heads):
+        if len(heads) == 0:
+            return
+        heads, index = utils.find_pruneable_heads_and_indices(
+            heads, 
+            self.attention.num_heads, 
+            self.attention.head_size, 
+            pruned_heads
+        )
+
+        # Prune linear layers
+        self.attention.q_transform = prune_linear_layer(self.attention.q_transform, index)
+        self.attention.k_transform = prune_linear_layer(self.attention.k_transform, index)
+        self.attention.v_transform = prune_linear_layer(self.attention.v_transform, index)
+        self.attention.o_transform = prune_linear_layer(self.attention.o_transform, index, dim=1)
+
+        # Update hyper params
+        self.attention.num_heads = self.attention.num_heads - len(heads)
+        self.attention.hidden_size = self.attention.head_size * self.attention.num_heads
+
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -55,7 +78,9 @@ class WeightedAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.enable_kappa = params.enable_kappa
         self.enable_alpha = params.enable_alpha
+        self.pruned_heads = set()
 
         with utils.scope(name):
             self.attention = modules.WeightedMultiHeadAttention(params.hidden_size, 
@@ -67,6 +92,30 @@ class WeightedAttentionSubLayer(modules.Module):
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
+
+    def _prune_heads(self, heads, pruned_heads):
+        if len(heads) == 0:
+            return
+        heads, index = utils.find_pruneable_heads_and_indices(
+            heads, 
+            self.attention.num_heads, 
+            self.attention.head_size, 
+            pruned_heads
+        )
+
+        # Prune linear layers
+        self.attention.q_transform = prune_linear_layer(self.attention.q_transform, index)
+        self.attention.k_transform = prune_linear_layer(self.attention.k_transform, index)
+        self.attention.v_transform = prune_linear_layer(self.attention.v_transform, index)
+        self.attention.o_transform = prune_linear_layer(self.attention.o_transform, index, dim=1)
+        if self.enable_kappa:
+            self.attention.kappa = prune_vector(self.attention.kappa, heads, 
+                                                self.attention.num_heads, pruned_heads)
+
+        # Update hyper params
+        self.attention.num_heads = self.attention.num_heads - len(heads)
+        self.attention.hidden_size = self.attention.head_size * self.attention.num_heads
+
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -115,6 +164,16 @@ class WeightedFFNSubLayer(modules.Module):
 
         self.additional_params = self.ffn_layer.additional_params
 
+    def _prune_heads(self, heads, pruned_heads):
+        if len(heads) == 0:
+            return
+        if self.enable_alpha:
+            self.ffn_layer.alpha = prune_vector(self.ffn_layer.alpha, heads, 
+                                                self.ffn_layer.num_heads, pruned_heads)
+        # Update hyper params
+        self.ffn_layer.num_heads = self.ffn_layer.num_heads - len(heads)
+
+
     def forward(self, x):
         if self.normalization == "before":
             y = self.layer_norm(x)
@@ -145,7 +204,13 @@ class WeightedTransformerEncoderLayer(modules.Module):
             self.self_attention = WeightedAttentionSubLayer(params)
             self.feed_forward = WeightedFFNSubLayer(params)
 
+        self.pruned_heads = set()
         self.additional_params = self.self_attention.additional_params + self.feed_forward.additional_params
+
+    def prune_heads(self, heads):
+        self.self_attention._prune_heads(heads, self.pruned_heads)
+        self.feed_forward._prune_heads(heads, self.pruned_heads)
+        self.pruned_heads = self.pruned_heads.union(heads)
 
     def forward(self, x, bias):
         x = self.self_attention(x, bias)
@@ -194,6 +259,13 @@ class WeightedTransformerEncoder(modules.Module):
         for layer in self.layers:
             self.additional_params += layer.additional_params
 
+    def _prune_heads(self, heads_to_prune):
+        """
+        Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
+        """
+        for layer, heads in heads_to_prune.items():
+            self.layers[layer].prune_heads(heads)
+
     def forward(self, x, bias):
         for layer in self.layers:
             x = layer(x, bias)
@@ -224,6 +296,16 @@ class WeightedTransformerDecoder(modules.Module):
         self.additional_params = []
         for layer in self.layers:
             self.additional_params += layer.additional_params
+
+    def _prune_heads(self, self_heads_to_prune, encdec_heads_to_prune):
+        """
+        Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
+        """
+        for layer, heads in self_heads_to_prune.items():
+            self.layers[layer].prune_heads(heads)
+
+        for layer, heads in encdec_heads_to_prune.items():
+            self.layers[layer].prune_heads(heads)
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
