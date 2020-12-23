@@ -130,10 +130,10 @@ def eval_loss(model, dataset, params):
     for features in tqdm(dataset, total=data_len):
         features, labels = data.lookup(features, "train", params)
         loss = model(features, labels, mode="eval")
-        total_loss += loss
+        total_loss += loss.sum().item()
     return total_loss / num_sentences
 
-def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False):
+def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False, env=None):
     from thumt.utils.evaluation import evaluate
     def drop_one_score(score_type="bleu"):
         if score_type == "bleu":
@@ -203,7 +203,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
     def visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores):
         try:
             import visdom
-            vis = visdom.Visdom(env=model.name)
+            vis = visdom.Visdom(env=env)
             assert vis.check_connection()
             
             vis.heatmap(np.array(encoder_head_scores), win="encoder_heads", 

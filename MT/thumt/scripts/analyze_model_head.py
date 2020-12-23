@@ -195,7 +195,7 @@ def main(args):
     # Create model
     with torch.no_grad():
 
-        model = model_cls(params)
+        model = model_cls(params).cuda()
 
         model.eval()
         model.load_state_dict(torch.load(checkpoint, map_location="cpu")["model"])
@@ -220,7 +220,7 @@ def main(args):
         elif args.function == "head_importance_score":
             head_scores = utils.head_importance_score(model, args.head_importance_method, 
                                                       dataset, sorted_key, eval_dataset, references, params,
-                                                      visualize=True)
+                                                      visualize=True, env=env_name)
 
 
 # Wrap main function
