@@ -6,6 +6,7 @@ from __future__ import division
 from __future__ import print_function
 
 import math
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -410,6 +411,11 @@ class WeightedTransformer(modules.Module):
         if not self.params.shared_embedding_and_softmax_weights:
             nn.init.normal_(self.softmax_weights, mean=0.0,
                             std=self.params.hidden_size ** -0.5)
+
+    def equal_heads(self):
+        for name, var in self.named_parameters():
+            if re.search("alpha|kappa", name):
+                var.data = torch.ones_like(var.data)
 
     def encode(self, features, state):
         src_seq = features["source"]

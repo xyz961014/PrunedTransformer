@@ -33,7 +33,7 @@ def visualize_head_selection(model, pattern, func=None, env=None):
             vis.bar(func(var.data, name), win=name, opts={"title": name})
 
 
-def prune_linear_layer(layer: torch.nn.Linear, index: torch.LongTensor, dim: int = 0) -> torch.nn.Linear:
+def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0):
     """
     Prune a linear layer to keep only entries in index.
 
@@ -136,11 +136,15 @@ def eval_loss(model, dataset, params):
 def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False, env=None):
     from thumt.utils.evaluation import evaluate
     def drop_one_score(score_type="bleu"):
+        # make all heads equal
+        model.equal_heads()
+        # compute full model score
         if score_type == "bleu":
             full_score = evaluate(model, sorted_key, eval_dataset,
                                  params.output, references, params)
         elif score_type == "loss":
             full_score = eval_loss(model, dataset, params)
+            print("loss: {:.3f}".format(full_score))
 
         encoder_head_scores = []
         for layer_num, layer in enumerate(model.encoder.layers):
@@ -155,6 +159,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                                             params.output, references, params) 
                 elif score_type == "loss":
                     score_wo_head = eval_loss(copy_model, dataset, params)
+                    print("loss: {:.3f}".format(score_wo_head))
                 delta_score = score_wo_head - full_score
                 layer_head_scores.append(delta_score)
             encoder_head_scores.append(layer_head_scores)
@@ -176,6 +181,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                                             params.output, references, params) 
                 elif score_type == "loss":
                     score_wo_head = eval_loss(copy_model, dataset, params)
+                    print("loss: {:.3f}".format(score_wo_head))
                 delta_score = score_wo_head - full_score
                 decoder_layer_head_scores.append(delta_score)
 
@@ -190,6 +196,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                                             params.output, references, params) 
                 elif score_type == "loss":
                     score_wo_head = eval_loss(copy_model, dataset, params)
+                    print("loss: {:.3f}".format(score_wo_head))
                 delta_score = score_wo_head - full_score
                 encdec_layer_head_scores.append(delta_score)
             decoder_head_scores.append(decoder_layer_head_scores)
