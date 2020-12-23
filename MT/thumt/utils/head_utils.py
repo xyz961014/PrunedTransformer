@@ -1,9 +1,14 @@
 import re
+import random
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from copy import copy, deepcopy
+from tqdm import tqdm
+
+import thumt.data as data
 
 
 def visualize_head_selection(model, pattern, func=None, env=None):
@@ -114,25 +119,116 @@ def find_pruneable_heads_and_indices(
     index: torch.LongTensor = torch.arange(len(mask))[mask].long()
     return heads, index
 
+def eval_loss(model, dataset, params):
+    total_loss = 0.
+    num_sentences = 0
+    data_len = 0
+    for features in dataset:
+        data_len += 1
+        num_sentences += features[1].shape[0]
 
-def head_importance_score(model, method, sorted_key, eval_dataset, references, params):
+    for features in tqdm(dataset, total=data_len):
+        features, labels = data.lookup(features, "train", params)
+        loss = model(features, labels, mode="eval")
+        total_loss += loss
+    return total_loss / num_sentences
+
+def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False):
     from thumt.utils.evaluation import evaluate
-    def drop_one_score():
-        #full_bleu = evaluate(model, sorted_key, eval_dataset,
-        #                     params.output, references, params)
-        full_bleu = 0.1
+    def drop_one_score(score_type="bleu"):
+        if score_type == "bleu":
+            full_score = evaluate(model, sorted_key, eval_dataset,
+                                 params.output, references, params)
+        elif score_type == "loss":
+            full_score = eval_loss(model, dataset, params)
 
         encoder_head_scores = []
-        for num, layer in enumerate(model.encoder.layers):
+        for layer_num, layer in enumerate(model.encoder.layers):
             layer_head_scores = []
             for head in range(params.num_heads):
                 copy_model = deepcopy(model)
-                head_to_prune = {num: [head]}
+                head_to_prune = {layer_num: [head]}
                 copy_model.encoder._prune_heads(head_to_prune)
-                bleu_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
-                                        params.output, references, params) 
-                import ipdb
-                ipdb.set_trace()
+                print("Validating model with pruning head {} at encoder layer {}".format(head, layer_num))
+                if score_type == "bleu":
+                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                            params.output, references, params) 
+                elif score_type == "loss":
+                    score_wo_head = eval_loss(copy_model, dataset, params)
+                delta_score = score_wo_head - full_score
+                layer_head_scores.append(delta_score)
+            encoder_head_scores.append(layer_head_scores)
 
-    if method == "drop_one":
-        return drop_one_score()
+        decoder_head_scores = []
+        encdec_head_scores = []
+        for layer_num, layer in enumerate(model.decoder.layers):
+            decoder_layer_head_scores = []
+            encdec_layer_head_scores = []
+
+            for head in range(params.num_heads):
+                copy_model = deepcopy(model)
+                head_to_prune = {layer_num: [head]}
+                copy_model.decoder._prune_heads(self_heads_to_prune=head_to_prune, 
+                                                encdec_heads_to_prune={})
+                print("Validating model with pruning head {} at decoder layer {}".format(head, layer_num))
+                if score_type == "bleu":
+                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                            params.output, references, params) 
+                elif score_type == "loss":
+                    score_wo_head = eval_loss(copy_model, dataset, params)
+                delta_score = score_wo_head - full_score
+                decoder_layer_head_scores.append(delta_score)
+
+            for head in range(params.num_heads):
+                copy_model = deepcopy(model)
+                head_to_prune = {layer_num: [head]}
+                copy_model.decoder._prune_heads(self_heads_to_prune={}, 
+                                                encdec_heads_to_prune=head_to_prune)
+                print("Validating model with pruning head {} at encdec layer {}".format(head, layer_num))
+                if score_type == "bleu":
+                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                            params.output, references, params) 
+                elif score_type == "loss":
+                    score_wo_head = eval_loss(copy_model, dataset, params)
+                delta_score = score_wo_head - full_score
+                encdec_layer_head_scores.append(delta_score)
+            decoder_head_scores.append(decoder_layer_head_scores)
+            encdec_head_scores.append(encdec_layer_head_scores)
+
+        if visualize:
+            visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
+
+        return encdec_head_scores, decoder_head_scores, encdec_head_scores
+
+    def visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores):
+        try:
+            import visdom
+            vis = visdom.Visdom(env=model.name)
+            assert vis.check_connection()
+            
+            vis.heatmap(np.array(encoder_head_scores), win="encoder_heads", 
+                        opts={
+                                "title": "encoder_head_scores",
+                                "rownames": ["layer{}".format(l) for l in range(len(model.encoder.layers))],
+                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                             })
+            vis.heatmap(np.array(decoder_head_scores), win="decoder_heads", 
+                        opts={
+                                "title": "decoder_head_scores",
+                                "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
+                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                             })
+            vis.heatmap(np.array(encdec_head_scores), win="encdec_heads", 
+                        opts={
+                                "title": "encdec_head_scores",
+                                "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
+                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                             })
+
+        except:
+            print("Visdom does not launch correctly.")
+
+    if method == "drop_one_bleu":
+        return drop_one_score(score_type="bleu")
+    elif method == "drop_one_loss":
+        return drop_one_score(score_type="loss")

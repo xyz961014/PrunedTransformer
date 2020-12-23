@@ -29,7 +29,7 @@ class AttentionSubLayer(modules.Module):
                                                         params.attention_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
-    def prune_heads(self, heads, pruned_heads):
+    def _prune_heads(self, heads, pruned_heads):
         if len(heads) == 0:
             return
         heads, index = utils.find_pruneable_heads_and_indices(
@@ -230,7 +230,18 @@ class WeightedTransformerDecoderLayer(modules.Module):
                                                               name="encdec_attention")
             self.feed_forward = WeightedFFNSubLayer(params)
 
+        self.self_pruned_heads = set()
+        self.encdec_pruned_heads = set()
         self.additional_params = self.encdec_attention.additional_params + self.feed_forward.additional_params
+
+    def self_prune_heads(self, heads):
+        self.self_attention._prune_heads(heads, self.self_pruned_heads)
+        self.self_pruned_heads = self.self_pruned_heads.union(heads)
+
+    def encdec_prune_heads(self, heads):
+        self.encdec_attention._prune_heads(heads, self.encdec_pruned_heads)
+        self.feed_forward._prune_heads(heads, self.encdec_pruned_heads)
+        self.encdec_pruned_heads = self.encdec_pruned_heads.union(heads)
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         x = self.self_attention(x, attn_bias, state=state)
@@ -302,10 +313,10 @@ class WeightedTransformerDecoder(modules.Module):
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
         """
         for layer, heads in self_heads_to_prune.items():
-            self.layers[layer].prune_heads(heads)
+            self.layers[layer].self_prune_heads(heads)
 
         for layer, heads in encdec_heads_to_prune.items():
-            self.layers[layer].prune_heads(heads)
+            self.layers[layer].encdec_prune_heads(heads)
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):

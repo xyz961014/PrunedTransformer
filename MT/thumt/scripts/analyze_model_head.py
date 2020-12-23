@@ -49,8 +49,8 @@ def parse_args():
                         help="Attention Head analyze function")
     parser.add_argument("--pattern", type=str, default="alpha|kappa",
                         help="pattern to find related parameter in visualize_head_selection")
-    parser.add_argument("--head_importance_method", type=str, default="drop_one",
-                        choices=["drop_one"],
+    parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
+                        choices=["drop_one_bleu", "drop_one_loss", "confidence"],
                         help="method to evaluate head importance in head_importance_score")
     parser.add_argument("--env", type=str, default="",
                         help="env for visdom")
@@ -78,6 +78,9 @@ def default_params():
         decode_batch_size=32,
         # evaluate
         keep_top_checkpoint_max=5,
+        buffer_size=10000,
+        max_length=256,
+        min_length=1,
     )
 
     return params
@@ -176,7 +179,8 @@ def main(args):
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
-    sorted_key, eval_dataset = data.get_dataset(args.input[1], "infer", params)
+    dataset = data.get_dataset(args.input, "train", params)
+    sorted_key, eval_dataset = data.get_dataset(args.input[0], "infer", params)
     references = load_references(args.input[1])
 
     if os.path.isdir(args.checkpoint):
@@ -216,7 +220,8 @@ def main(args):
 
         elif args.function == "head_importance_score":
             head_scores = utils.head_importance_score(model, args.head_importance_method, 
-                                                      sorted_key, eval_dataset, references, params)
+                                                      dataset, sorted_key, eval_dataset, references, params,
+                                                      visualize=True)
 
 
 # Wrap main function
