@@ -20,7 +20,6 @@ import torch.nn.functional as F
 import thumt.data as data
 import thumt.models as models
 import thumt.utils as utils
-from thumt.utils import visualize_head_selection
 
 
 def parse_args():
@@ -216,7 +215,7 @@ def main(args):
                 else:
                     return F.softmax(var, dim=0)
 
-            visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
+            utils.visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
 
         elif args.function == "head_importance_score":
             head_scores = utils.head_importance_score(model, args.head_importance_method, 
