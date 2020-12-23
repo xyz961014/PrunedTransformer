@@ -486,11 +486,11 @@ class WeightedTransformer(modules.Module):
         state = {
             "decoder": {
                 "layer_%d" % i: {
-                    "k": torch.zeros([batch_size, 0, self.hidden_size],
+                    "k": torch.zeros([batch_size, 0, layer.self_attention.attention.hidden_size],
                                      device=device),
-                    "v": torch.zeros([batch_size, 0, self.hidden_size],
+                    "v": torch.zeros([batch_size, 0, layer.self_attention.attention.hidden_size],
                                      device=device)
-                } for i in range(self.num_decoder_layers)
+                } for i, layer in enumerate(self.decoder.layers)
             }
         }
 
