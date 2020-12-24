@@ -412,10 +412,10 @@ class WeightedTransformer(modules.Module):
             nn.init.normal_(self.softmax_weights, mean=0.0,
                             std=self.params.hidden_size ** -0.5)
 
-    #def equal_heads(self):
-    #    for name, var in self.named_parameters():
-    #        if re.search("alpha|kappa", name):
-    #            var.data = torch.ones_like(var.data)
+    def equal_heads(self):
+        for name, var in self.named_parameters():
+            if re.search("alpha|kappa", name):
+                var.data = torch.ones_like(var.data)
 
     def encode(self, features, state):
         src_seq = features["source"]

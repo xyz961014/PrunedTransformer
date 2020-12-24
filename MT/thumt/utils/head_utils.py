@@ -133,8 +133,12 @@ def eval_loss(model, dataset, params):
         total_loss += loss.sum().item()
     return total_loss / num_sentences
 
-def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False, env=None):
+def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, 
+                          visualize=False, env=None, equal_heads=False):
     from thumt.utils.evaluation import evaluate
+    if equal_heads:
+        # make all heads equal
+        model.equal_heads()
     def drop_one_score(score_type="loss"):
         # compute full model score
         if score_type == "bleu":
@@ -221,13 +225,13 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                              })
             vis.heatmap(np.array(decoder_head_scores), win=method + " decoder_heads", 
                         opts={
-                                "title": method + "decoder_head_scores",
+                                "title": method + " decoder_head_scores",
                                 "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
                                 "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
                              })
-            vis.heatmap(np.array(encdec_head_scores), win=method + "encdec_heads", 
+            vis.heatmap(np.array(encdec_head_scores), win=method + " encdec_heads", 
                         opts={
-                                "title": method + "encdec_head_scores",
+                                "title": method + " encdec_head_scores",
                                 "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
                                 "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
                              })

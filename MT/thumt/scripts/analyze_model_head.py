@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
                         choices=["drop_one_bleu", "drop_one_loss", "confidence"],
                         help="method to evaluate head importance in head_importance_score")
+    parser.add_argument("--equal_heads", action="store_true", 
+                        help="make all head equal in head_importance_score")
     parser.add_argument("--env", type=str, default="",
                         help="env for visdom")
 
@@ -220,7 +222,7 @@ def main(args):
         elif args.function == "head_importance_score":
             head_scores = utils.head_importance_score(model, args.head_importance_method, 
                                                       dataset, sorted_key, eval_dataset, references, params,
-                                                      visualize=True, env=env_name)
+                                                      visualize=True, env=env_name, equal_heads=args.equal_heads)
 
 
 # Wrap main function
