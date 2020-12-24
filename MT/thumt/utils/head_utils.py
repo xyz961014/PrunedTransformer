@@ -135,9 +135,7 @@ def eval_loss(model, dataset, params):
 
 def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, visualize=False, env=None):
     from thumt.utils.evaluation import evaluate
-    def drop_one_score(score_type="bleu"):
-        # make all heads equal
-        model.equal_heads()
+    def drop_one_score(score_type="loss"):
         # compute full model score
         if score_type == "bleu":
             full_score = evaluate(model, sorted_key, eval_dataset,
@@ -145,6 +143,8 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
         elif score_type == "loss":
             full_score = eval_loss(model, dataset, params)
             print("loss: {:.3f}".format(full_score))
+        else:
+            raise ValueError("Unkown score type")
 
         encoder_head_scores = []
         for layer_num, layer in enumerate(model.encoder.layers):
@@ -213,21 +213,21 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
             vis = visdom.Visdom(env=env)
             assert vis.check_connection()
             
-            vis.heatmap(np.array(encoder_head_scores), win="encoder_heads", 
+            vis.heatmap(np.array(encoder_head_scores), win=method + " encoder_heads", 
                         opts={
-                                "title": "encoder_head_scores",
+                                "title": method + " encoder_head_scores",
                                 "rownames": ["layer{}".format(l) for l in range(len(model.encoder.layers))],
                                 "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
                              })
-            vis.heatmap(np.array(decoder_head_scores), win="decoder_heads", 
+            vis.heatmap(np.array(decoder_head_scores), win=method + " decoder_heads", 
                         opts={
-                                "title": "decoder_head_scores",
+                                "title": method + "decoder_head_scores",
                                 "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
                                 "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
                              })
-            vis.heatmap(np.array(encdec_head_scores), win="encdec_heads", 
+            vis.heatmap(np.array(encdec_head_scores), win=method + "encdec_heads", 
                         opts={
-                                "title": "encdec_head_scores",
+                                "title": method + "encdec_head_scores",
                                 "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
                                 "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
                              })

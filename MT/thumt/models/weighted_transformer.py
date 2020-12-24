@@ -412,10 +412,10 @@ class WeightedTransformer(modules.Module):
             nn.init.normal_(self.softmax_weights, mean=0.0,
                             std=self.params.hidden_size ** -0.5)
 
-    def equal_heads(self):
-        for name, var in self.named_parameters():
-            if re.search("alpha|kappa", name):
-                var.data = torch.ones_like(var.data)
+    #def equal_heads(self):
+    #    for name, var in self.named_parameters():
+    #        if re.search("alpha|kappa", name):
+    #            var.data = torch.ones_like(var.data)
 
     def encode(self, features, state):
         src_seq = features["source"]
@@ -532,10 +532,10 @@ class WeightedTransformer(modules.Module):
             normalization="after",
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
-            enable_alpha=True,
+            enable_alpha=False,
             enable_kappa=True,
-            expand_alpha_norm=False,
-            expand_kappa_norm=False,
+            expand_alpha_norm=True,
+            expand_kappa_norm=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
