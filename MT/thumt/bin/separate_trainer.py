@@ -532,7 +532,7 @@ def main(args):
     additional_optimizer = optimizers.MultiStepOptimizer(additional_optimizer, params.update_cycle)
 
     additional_flags = print_additional_variables(model, params.additional_pattern,
-                                      dist.get_rank() == 0)
+                                                  dist.get_rank() == 0)
 
 
     dataset = data.get_dataset(params.input, "train", params)
@@ -595,12 +595,12 @@ def main(args):
             loss = train_fn(features)
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
-            if step < params.train_steps:
+            if True in trainable_flags and step < params.train_steps:
                 grads_and_vars = exclude_variables(
                     trainable_flags,
                     zip(gradients, list(model.named_parameters())))
                 optimizer.apply_gradients(grads_and_vars)
-            if params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
+            if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
                 # update grads for additional optimizer
                 additional_grads_and_vars = exclude_variables(
                     additional_flags,
@@ -615,14 +615,14 @@ def main(args):
             if counter % params.update_cycle == 0:
                 if step > 0 and step % args.log_interval == 0:
                     elapsed = time.time() - start_time
-                    if step < params.train_steps:
+                    if True in trainable_flags and step < params.train_steps:
                         print('| epoch {:2d} | step {:17d} | lr {:02.2e} | '
                               'ms/step {:4.0f} | loss {:8.4f} '.format(
                             epoch + 1, step, 
                             optimizer._optimizer._learning_rate(step),
                             elapsed * 1000 / args.log_interval, 
                             loss.item()))
-                    if params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
+                    if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
                         print('| epoch {:2d} | additional step {:6d} | lr {:02.2e} | '
                               'ms/step {:4.0f} | loss {:8.4f} '.format(
                             epoch + 1, additional_step, 
