@@ -135,81 +135,257 @@ def eval_loss(model, dataset, params):
 
 def head_importance_score(model, method, dataset, sorted_key, eval_dataset, references, params, 
                           visualize=False, env=None, equal_heads=False):
+    # the more important, the larger score it gets
     from thumt.utils.evaluation import evaluate
     if equal_heads:
         # make all heads equal
         model.equal_heads()
+
     def drop_one_score(score_type="loss"):
         # compute full model score
-        if score_type == "bleu":
-            full_score = evaluate(model, sorted_key, eval_dataset,
-                                 params.output, references, params)
-        elif score_type == "loss":
-            full_score = eval_loss(model, dataset, params)
-            print("loss: {:.3f}".format(full_score))
-        else:
-            raise ValueError("Unkown score type")
+        with torch.no_grad():
+            if score_type == "bleu":
+                full_score = evaluate(model, sorted_key, eval_dataset,
+                                     params.output, references, params)
+            elif score_type == "loss":
+                full_score = eval_loss(model, dataset, params)
+                print("loss: {:.3f}".format(full_score))
+            else:
+                raise ValueError("Unkown score type")
 
-        encoder_head_scores = []
-        for layer_num, layer in enumerate(model.encoder.layers):
-            layer_head_scores = []
-            for head in range(params.num_heads):
-                copy_model = deepcopy(model)
-                head_to_prune = {layer_num: [head]}
-                copy_model.encoder._prune_heads(head_to_prune)
-                print("Validating model with pruning head {} at encoder layer {}".format(head, layer_num))
-                if score_type == "bleu":
-                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
-                                            params.output, references, params) 
-                elif score_type == "loss":
-                    score_wo_head = eval_loss(copy_model, dataset, params)
-                    print("loss: {:.3f}".format(score_wo_head))
-                delta_score = score_wo_head - full_score
-                layer_head_scores.append(delta_score)
-            encoder_head_scores.append(layer_head_scores)
+            encoder_head_scores = []
+            for layer_num, layer in enumerate(model.encoder.layers):
+                layer_head_scores = []
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [head]}
+                    copy_model.encoder._prune_heads(head_to_prune)
+                    print("Validating model with pruning head {} at encoder layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    layer_head_scores.append(delta_score)
+                encoder_head_scores.append(layer_head_scores)
 
-        decoder_head_scores = []
-        encdec_head_scores = []
-        for layer_num, layer in enumerate(model.decoder.layers):
-            decoder_layer_head_scores = []
-            encdec_layer_head_scores = []
+            decoder_head_scores = []
+            encdec_head_scores = []
+            for layer_num, layer in enumerate(model.decoder.layers):
+                decoder_layer_head_scores = []
+                encdec_layer_head_scores = []
 
-            for head in range(params.num_heads):
-                copy_model = deepcopy(model)
-                head_to_prune = {layer_num: [head]}
-                copy_model.decoder._prune_heads(self_heads_to_prune=head_to_prune, 
-                                                encdec_heads_to_prune={})
-                print("Validating model with pruning head {} at decoder layer {}".format(head, layer_num))
-                if score_type == "bleu":
-                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
-                                            params.output, references, params) 
-                elif score_type == "loss":
-                    score_wo_head = eval_loss(copy_model, dataset, params)
-                    print("loss: {:.3f}".format(score_wo_head))
-                delta_score = score_wo_head - full_score
-                decoder_layer_head_scores.append(delta_score)
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [head]}
+                    copy_model.decoder._prune_heads(self_heads_to_prune=head_to_prune, 
+                                                    encdec_heads_to_prune={})
+                    print("Validating model with pruning head {} at decoder layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    decoder_layer_head_scores.append(delta_score)
 
-            for head in range(params.num_heads):
-                copy_model = deepcopy(model)
-                head_to_prune = {layer_num: [head]}
-                copy_model.decoder._prune_heads(self_heads_to_prune={}, 
-                                                encdec_heads_to_prune=head_to_prune)
-                print("Validating model with pruning head {} at encdec layer {}".format(head, layer_num))
-                if score_type == "bleu":
-                    score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
-                                            params.output, references, params) 
-                elif score_type == "loss":
-                    score_wo_head = eval_loss(copy_model, dataset, params)
-                    print("loss: {:.3f}".format(score_wo_head))
-                delta_score = score_wo_head - full_score
-                encdec_layer_head_scores.append(delta_score)
-            decoder_head_scores.append(decoder_layer_head_scores)
-            encdec_head_scores.append(encdec_layer_head_scores)
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [head]}
+                    copy_model.decoder._prune_heads(self_heads_to_prune={}, 
+                                                    encdec_heads_to_prune=head_to_prune)
+                    print("Validating model with pruning head {} at encdec layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    encdec_layer_head_scores.append(delta_score)
+                decoder_head_scores.append(decoder_layer_head_scores)
+                encdec_head_scores.append(encdec_layer_head_scores)
 
         if visualize:
             visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
 
-        return encdec_head_scores, decoder_head_scores, encdec_head_scores
+        return encoder_head_scores, decoder_head_scores, encdec_head_scores
+
+    def confidence():
+        encoder_head_scores = None 
+        decoder_head_scores = None
+        encdec_head_scores = None
+        num_sentences = 0
+        data_len = 0
+        for features in dataset:
+            data_len += 1
+            num_sentences += features[1].shape[0]
+
+        with torch.no_grad():
+            for features in tqdm(dataset, total=data_len):
+                features, labels = data.lookup(features, "train", params)
+                confidences = model.compute_confidence(features, labels) 
+                encoder_confidence, decoder_confidence, encdec_confidence = confidences
+                # each confidence score is a list of list, convert to np.array
+                encoder_confidence = np.array(encoder_confidence)
+                decoder_confidence = np.array(decoder_confidence)
+                encdec_confidence = np.array(encdec_confidence)
+                if encoder_head_scores is None:
+                    encoder_head_scores = encoder_confidence
+                else:
+                    encoder_head_scores += decoder_confidence
+                if decoder_head_scores is None:
+                    decoder_head_scores = decoder_confidence
+                else:
+                    decoder_head_scores += decoder_confidence
+                if encdec_head_scores is None:
+                    encdec_head_scores = encdec_confidence
+                else:
+                    encdec_head_scores += encdec_confidence
+        
+        encoder_head_scores = (encoder_head_scores / num_sentences).tolist()
+        decoder_head_scores = (decoder_head_scores / num_sentences).tolist()
+        encdec_head_scores = (encdec_head_scores / num_sentences).tolist()
+            
+        if visualize:
+            visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
+
+        return encoder_head_scores, decoder_head_scores, encdec_head_scores
+
+    def remain_one_score(score_type="loss"):
+        # compute full model score
+        with torch.no_grad():
+            if score_type == "bleu":
+                full_score = evaluate(model, sorted_key, eval_dataset,
+                                     params.output, references, params)
+            elif score_type == "loss":
+                full_score = eval_loss(model, dataset, params)
+                print("loss: {:.3f}".format(full_score))
+            else:
+                raise ValueError("Unkown score type")
+
+            encoder_head_scores = []
+            for layer_num, layer in enumerate(model.encoder.layers):
+                layer_head_scores = []
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [h for h in range(params.num_heads) if not h == head]}
+                    copy_model.encoder._prune_heads(head_to_prune)
+                    print("Validating model with pruning head {} at encoder layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    layer_head_scores.append(delta_score)
+                encoder_head_scores.append(layer_head_scores)
+
+            decoder_head_scores = []
+            encdec_head_scores = []
+            for layer_num, layer in enumerate(model.decoder.layers):
+                decoder_layer_head_scores = []
+                encdec_layer_head_scores = []
+
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [h for h in range(params.num_heads) if not h == head]}
+                    copy_model.decoder._prune_heads(self_heads_to_prune=head_to_prune, 
+                                                    encdec_heads_to_prune={})
+                    print("Validating model with pruning head {} at decoder layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    decoder_layer_head_scores.append(delta_score)
+
+                for head in range(params.num_heads):
+                    copy_model = deepcopy(model)
+                    head_to_prune = {layer_num: [h for h in range(params.num_heads) if not h == head]}
+                    copy_model.decoder._prune_heads(self_heads_to_prune={}, 
+                                                    encdec_heads_to_prune=head_to_prune)
+                    print("Validating model with pruning head {} at encdec layer {}".format(head, layer_num))
+                    if score_type == "bleu":
+                        score_wo_head = evaluate(copy_model, sorted_key, eval_dataset,
+                                                params.output, references, params) 
+                    elif score_type == "loss":
+                        score_wo_head = eval_loss(copy_model, dataset, params)
+                        print("loss: {:.3f}".format(score_wo_head))
+                    delta_score = score_wo_head - full_score
+                    if score_type == "bleu":
+                        delta_score = -delta_score
+                    encdec_layer_head_scores.append(delta_score)
+                decoder_head_scores.append(decoder_layer_head_scores)
+                encdec_head_scores.append(encdec_layer_head_scores)
+
+        if visualize:
+            visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
+
+        return encoder_head_scores, decoder_head_scores, encdec_head_scores
+
+
+
+    def grad_sensitivity():
+        encoder_head_scores = None 
+        decoder_head_scores = None
+        encdec_head_scores = None
+        num_sentences = 0
+        data_len = 0
+        for features in dataset:
+            data_len += 1
+            num_sentences += features[1].shape[0]
+
+        for features in tqdm(dataset, total=data_len):
+            model.zero_grad()
+            features, labels = data.lookup(features, "train", params)
+            scores = model.compute_grad_sensitivity(features, labels) 
+            encoder_score, decoder_score, encdec_score = scores
+            # each score score is a list of list, convert to np.array
+            encoder_score = np.array(encoder_score)
+            decoder_score = np.array(decoder_score)
+            encdec_score = np.array(encdec_score)
+ 
+            # each score score is a (layer_num * num_heads) Tensor
+            if encoder_head_scores is None:
+                encoder_head_scores = encoder_score
+            else:
+                encoder_head_scores += decoder_score
+            if decoder_head_scores is None:
+                decoder_head_scores = decoder_score
+            else:
+                decoder_head_scores += decoder_score
+            if encdec_head_scores is None:
+                encdec_head_scores = encdec_score
+            else:
+                encdec_head_scores += encdec_score
+        
+        encoder_head_scores = (encoder_head_scores / num_sentences).tolist()
+        decoder_head_scores = (decoder_head_scores / num_sentences).tolist()
+        encdec_head_scores = (encdec_head_scores / num_sentences).tolist()
+            
+        if visualize:
+            visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
+
+        return encoder_head_scores, decoder_head_scores, encdec_head_scores
+
+
 
     def visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores):
         try:
@@ -243,3 +419,13 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
         return drop_one_score(score_type="bleu")
     elif method == "drop_one_loss":
         return drop_one_score(score_type="loss")
+    elif method == "confidence":
+        return confidence()
+    elif method == "remain_one_bleu":
+        return remain_one_score(score_type="bleu")
+    elif method == "remain_one_loss":
+        return remain_one_score(score_type="loss")
+    elif method == "grad_sensitivity":
+        return grad_sensitivity()
+    else:
+        raise ValueError("Unkown head score method {}".format(method))

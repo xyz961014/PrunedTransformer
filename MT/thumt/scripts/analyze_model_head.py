@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument("--pattern", type=str, default="alpha|kappa",
                         help="pattern to find related parameter in visualize_head_selection")
     parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
-                        choices=["drop_one_bleu", "drop_one_loss", "confidence"],
+                        choices=["drop_one_bleu", "drop_one_loss", "confidence", "remain_one_loss", "remain_one_bleu", "grad_sensitivity"],
                         help="method to evaluate head importance in head_importance_score")
     parser.add_argument("--equal_heads", action="store_true", 
                         help="make all head equal in head_importance_score")
@@ -195,34 +195,32 @@ def main(args):
         env_name = args.env
 
     # Create model
-    with torch.no_grad():
+    model = model_cls(params).cuda()
 
-        model = model_cls(params).cuda()
+    model.eval()
+    model.load_state_dict(torch.load(checkpoint, map_location="cpu")["model"])
 
-        model.eval()
-        model.load_state_dict(torch.load(checkpoint, map_location="cpu")["model"])
-
-        if args.function == "visualize_head_selection":
-            def compute_head_selection_weight(var, name):
-                if re.search("kappa", name):
-                    if params.expand_kappa_norm:
-                        return F.softmax(var, dim=0) * params.num_heads
-                    else:
-                        return F.softmax(var, dim=0)
-                elif re.search("alpha", name):
-                    if params.expand_alpha_norm:
-                        return F.softmax(var, dim=0) * params.num_heads
-                    else:
-                        return F.softmax(var, dim=0)
+    if args.function == "visualize_head_selection":
+        def compute_head_selection_weight(var, name):
+            if re.search("kappa", name):
+                if params.expand_kappa_norm:
+                    return F.softmax(var, dim=0) * params.num_heads
                 else:
                     return F.softmax(var, dim=0)
+            elif re.search("alpha", name):
+                if params.expand_alpha_norm:
+                    return F.softmax(var, dim=0) * params.num_heads
+                else:
+                    return F.softmax(var, dim=0)
+            else:
+                return F.softmax(var, dim=0)
 
-            utils.visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
+        utils.visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
 
-        elif args.function == "head_importance_score":
-            head_scores = utils.head_importance_score(model, args.head_importance_method, 
-                                                      dataset, sorted_key, eval_dataset, references, params,
-                                                      visualize=True, env=env_name, equal_heads=args.equal_heads)
+    elif args.function == "head_importance_score":
+        head_scores = utils.head_importance_score(model, args.head_importance_method, 
+                                                  dataset, sorted_key, eval_dataset, references, params,
+                                                  visualize=True, env=env_name, equal_heads=args.equal_heads)
 
 
 # Wrap main function

@@ -182,6 +182,65 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         return output
 
+    def forward_with_head_analysis(self, query, bias, memory=None, kv=None, mode=None):
+        q = self.q_transform(query)
+
+        if memory is not None:
+            if kv is not None:
+                k, v = kv
+            else:
+                k, v = None, None
+
+            # encoder-decoder attention
+            k = k or self.k_transform(memory)
+            v = v or self.v_transform(memory)
+        else:
+            # self-attention
+            k = self.k_transform(query)
+            v = self.v_transform(query)
+
+            if kv is not None:
+                k = torch.cat([kv[0], k], dim=1)
+                v = torch.cat([kv[1], v], dim=1)
+
+        # split heads
+        qh = self.split_heads(q, self.num_heads)
+        kh = self.split_heads(k, self.num_heads)
+        vh = self.split_heads(v, self.num_heads)
+
+        # scale query
+        qh = qh * (self.hidden_size // self.num_heads) ** -0.5
+
+        # dot-product attention
+        kh = torch.transpose(kh, -2, -1)
+        logits = torch.matmul(qh, kh)
+
+        if bias is not None:
+            logits = logits + bias
+
+        weights = F.dropout(torch.softmax(logits, dim=-1),
+                            p=self.dropout,
+                            training=self.training)
+
+        x = torch.matmul(weights, vh)
+
+        # combine heads
+        output = self.o_transform(self.combine_heads(x))
+
+        if mode == "confidence":
+            head_feature = weights.max(dim=-1)[0].mean(dim=(0, 2))
+        elif mode == "grad_sensitivity":
+            output.retain_grad()
+            head_feature = output
+        else:
+            raise ValueError("Unknown head analysis mode {}".format(mode))
+
+        if kv is not None:
+            return output, k, v, head_feature
+
+        return output, head_feature
+
+
     def reset_parameters(self, initializer="uniform_scaling", **kwargs):
         if initializer == "uniform_scaling":
             # 6 / (4 * hidden_size) -> 6 / (2 * hidden_size)
@@ -384,6 +443,83 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             return output, k, v
 
         return output
+
+    def forward_with_head_analysis(self, query, bias, memory=None, kv=None, mode=None):
+        q = self.q_transform(query)
+
+        if memory is not None:
+            if kv is not None:
+                k, v = kv
+            else:
+                k, v = None, None
+
+            # encoder-decoder attention
+            k = k or self.k_transform(memory)
+            v = v or self.v_transform(memory)
+        else:
+            # self-attention
+            k = self.k_transform(query)
+            v = self.v_transform(query)
+
+            if kv is not None:
+                k = torch.cat([kv[0], k], dim=1)
+                v = torch.cat([kv[1], v], dim=1)
+
+        # split heads
+        qh = self.split_heads(q, self.num_heads)
+        kh = self.split_heads(k, self.num_heads)
+        vh = self.split_heads(v, self.num_heads)
+
+        # scale query
+        qh = qh * (self.hidden_size // self.num_heads) ** -0.5
+
+        # dot-product attention
+        kh = torch.transpose(kh, -2, -1)
+        logits = torch.matmul(qh, kh)
+
+        if bias is not None:
+            logits = logits + bias
+
+        weights = F.dropout(torch.softmax(logits, dim=-1),
+                            p=self.dropout,
+                            training=self.training)
+
+        x = torch.matmul(weights, vh)
+
+        if self.enable_kappa and self.enable_alpha:
+            # combine kappa weights
+            normalized_kappa = F.softmax(self.kappa, dim=0)
+            if self.expand_kappa_norm:
+                normalized_kappa = normalized_kappa * self.num_heads
+            x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
+            output = self.o_transform(x)
+        elif not self.enable_kappa and self.enable_alpha:
+            # do not combine heads
+            output = self.o_transform(x)
+        elif self.enable_kappa and not self.enable_alpha:
+            # combine kappa weights and combine heads
+            normalized_kappa = F.softmax(self.kappa, dim=0)
+            if self.expand_kappa_norm:
+                normalized_kappa = normalized_kappa * self.num_heads
+            x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
+            output = self.o_transform(self.combine_heads(x))
+        else:
+            # combine heads
+            output = self.o_transform(self.combine_heads(x))
+
+        if mode == "confidence":
+            head_feature = weights.max(dim=-1)[0].mean(dim=(0, 2))
+        elif mode == "grad_sensitivity":
+            output.retain_grad()
+            head_feature = output
+        else:
+            raise ValueError("Unknown head analysis mode {}".format(mode))
+
+        if kv is not None:
+            return output, k, v, head_feature
+
+        return output, head_feature
+
 
     def reset_parameters(self, initializer="uniform_scaling", **kwargs):
         if initializer == "uniform_scaling":

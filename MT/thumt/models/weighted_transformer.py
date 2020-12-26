@@ -71,6 +71,26 @@ class AttentionSubLayer(modules.Module):
         else:
             return self.layer_norm(x + y)
 
+    def forward_with_head_analysis(self, x, bias, memory=None, state=None, mode=None):
+        if self.normalization == "before":
+            y = self.layer_norm(x)
+        else:
+            y = x
+
+        if self.training or state is None:
+            y, head_feature = self.attention.forward_with_head_analysis(y, bias, memory, None, mode=mode)
+        else:
+            kv = [state["k"], state["v"]]
+            y, k, v, head_feature = self.attention.forward_with_head_analysis(y, bias, memory, kv, mode=mode)
+            state["k"], state["v"] = k, v
+
+        y = F.dropout(y, self.dropout, self.training)
+
+        if self.normalization == "before":
+            return x + y, head_feature
+        else:
+            return self.layer_norm(x + y), head_feature
+
 
 class WeightedAttentionSubLayer(modules.Module):
 
@@ -143,6 +163,33 @@ class WeightedAttentionSubLayer(modules.Module):
                 return x + y
             else:
                 return self.layer_norm(x + y)
+
+    def forward_with_head_analysis(self, x, bias, memory=None, state=None, mode=None):
+        if self.normalization == "before":
+            y = self.layer_norm(x)
+        else:
+            y = x
+
+        if self.training or state is None:
+            y, head_feature = self.attention.forward_with_head_analysis(y, bias, memory, None, mode=mode)
+        else:
+            kv = [state["k"], state["v"]]
+            y, k, v, head_feature = self.attention.forward_with_head_analysis(y, bias, memory, kv, mode=mode)
+            state["k"], state["v"] = k, v
+
+        y = F.dropout(y, self.dropout, self.training)
+
+        if self.enable_alpha:
+            if self.normalization == "before":
+                return x.unsqueeze(1) + y, head_feature
+            else:
+                return self.layer_norm(x.unsqueeze(1) + y), head_feature
+        else:
+            if self.normalization == "before":
+                return x + y, head_feature
+            else:
+                return self.layer_norm(x + y), head_feature
+
 
 
 class WeightedFFNSubLayer(modules.Module):
@@ -218,6 +265,11 @@ class WeightedTransformerEncoderLayer(modules.Module):
         x = self.feed_forward(x)
         return x
 
+    def forward_with_head_analysis(self, x, bias, mode):
+        # head_feature is 1-dim tensor
+        x, head_feature = self.self_attention.forward_with_head_analysis(x, bias, mode=mode)
+        x = self.feed_forward(x)
+        return x, head_feature
 
 class WeightedTransformerDecoderLayer(modules.Module):
 
@@ -249,6 +301,12 @@ class WeightedTransformerDecoderLayer(modules.Module):
         x = self.encdec_attention(x, encdec_bias, memory)
         x = self.feed_forward(x)
         return x
+
+    def forward_with_head_analysis(self, x, attn_bias, encdec_bias, memory, state=None, mode=None):
+        x, decoder_feature = self.self_attention.forward_with_head_analysis(x, attn_bias, state=state, mode=mode)
+        x, encdec_feature = self.encdec_attention.forward_with_head_analysis(x, encdec_bias, memory, mode=mode)
+        x = self.feed_forward(x)
+        return x, decoder_feature, encdec_feature
 
 
 class WeightedTransformerEncoder(modules.Module):
@@ -286,6 +344,21 @@ class WeightedTransformerEncoder(modules.Module):
             x = self.layer_norm(x)
 
         return x
+
+    def forward_with_head_analysis(self, x, bias, mode):
+        head_feature = []
+        for layer in self.layers:
+            x, layer_head_feature = layer.forward_with_head_analysis(x, bias, mode)
+            # layer_head_feature is list for confidence and intermediate variable for grad_sensitivity
+            if mode == "confidence":
+                head_feature.append(layer_head_feature.tolist())
+            elif mode == "grad_sensitivity":
+                head_feature.append(layer_head_feature)
+
+        if self.normalization == "before":
+            x = self.layer_norm(x)
+
+        return x, head_feature
 
 
 class WeightedTransformerDecoder(modules.Module):
@@ -331,6 +404,28 @@ class WeightedTransformerDecoder(modules.Module):
             x = self.layer_norm(x)
 
         return x
+
+    def forward_with_head_analysis(self, x, attn_bias, encdec_bias, memory, state=None, mode=None):
+        decoder_head_feature = []
+        encdec_head_feature = []
+        for i, layer in enumerate(self.layers):
+            if state is not None:
+                x, layer_decoder_feature, layer_encdec_feature = layer.forward_with_head_analysis(x, attn_bias, encdec_bias, memory, state["decoder"]["layer_%d" % i], mode=mode)
+            else:
+                x, layer_decoder_feature, layer_encdec_feature = layer.forward_with_head_analysis(x, attn_bias, encdec_bias, memory, None, mode=mode)
+
+            # layer_head_feature is list for confidence and intermediate variable for grad_sensitivity
+            if mode == "confidence":
+                decoder_head_feature.append(layer_decoder_feature.tolist())
+                encdec_head_feature.append(layer_encdec_feature.tolist())
+            elif mode == "grad_sensitivity":
+                decoder_head_feature.append(layer_decoder_feature)
+                encdec_head_feature.append(layer_encdec_feature)
+
+        if self.normalization == "before":
+            x = self.layer_norm(x)
+
+        return x, decoder_head_feature, encdec_head_feature
 
 
 class WeightedTransformer(modules.Module):
@@ -465,6 +560,129 @@ class WeightedTransformer(modules.Module):
         logits = torch.transpose(logits, 0, 1)
 
         return logits, state
+
+    def encode_with_head_analysis(self, features, state, mode):
+        src_seq = features["source"]
+        src_mask = features["source_mask"]
+        enc_attn_bias = self.masking_bias(src_mask)
+
+        inputs = F.embedding(src_seq, self.src_embedding)
+        inputs = inputs * (self.hidden_size ** 0.5)
+        inputs = inputs + self.bias
+        inputs = F.dropout(self.encoding(inputs), self.dropout, self.training)
+
+        enc_attn_bias = enc_attn_bias.to(inputs)
+        encoder_output, head_feature = self.encoder.forward_with_head_analysis(inputs, enc_attn_bias, mode)
+
+        state["encoder_output"] = encoder_output
+        state["enc_attn_bias"] = enc_attn_bias
+
+        return state, head_feature
+
+    def decode_with_head_analysis(self, features, state, mode):
+        tgt_seq = features["target"]
+
+        enc_attn_bias = state["enc_attn_bias"]
+        dec_attn_bias = self.causal_bias(tgt_seq.shape[1])
+
+        targets = F.embedding(tgt_seq, self.tgt_embedding)
+        targets = targets * (self.hidden_size ** 0.5)
+
+        decoder_input = torch.cat(
+            [targets.new_zeros([targets.shape[0], 1, targets.shape[-1]]),
+             targets[:, 1:, :]], dim=1)
+        decoder_input = F.dropout(self.encoding(decoder_input), self.dropout, self.training)
+
+        encoder_output = state["encoder_output"]
+        dec_attn_bias = dec_attn_bias.to(targets)
+
+        decoder_output, decoder_head_feature, encdec_head_feature = self.decoder.forward_with_head_analysis(
+                        decoder_input, 
+                        dec_attn_bias,
+                        enc_attn_bias, 
+                        encoder_output, 
+                        state,
+                        mode)
+
+        state["dec_attn_bias"] = dec_attn_bias
+
+        decoder_output = torch.reshape(decoder_output, [-1, self.hidden_size])
+        decoder_output = torch.transpose(decoder_output, -1, -2)
+        logits = torch.matmul(self.softmax_embedding, decoder_output)
+        logits = torch.transpose(logits, 0, 1)
+
+
+        return logits, state, decoder_head_feature, encdec_head_feature
+
+
+    def compute_confidence(self, features, labels):
+        mask = features["target_mask"]
+
+        state = self.empty_state(features["target"].shape[0],
+                                 labels.device)
+        state, encoder_confidence = self.encode_with_head_analysis(features, state, mode="confidence")
+        _, _, decoder_confidence, encdec_confidence = self.decode_with_head_analysis(features, state, mode="confidence")
+
+        return encoder_confidence, decoder_confidence, encdec_confidence
+
+    def compute_grad_sensitivity(self, features, labels):
+        mask = features["target_mask"]
+
+        state = self.empty_state(features["target"].shape[0], labels.device)
+        state, encoder_variable = self.encode_with_head_analysis(features, state, mode="grad_sensitivity")
+        logits, _, decoder_variable, encdec_variable = self.decode_with_head_analysis(features, state, 
+                                                                                      mode="grad_sensitivity")
+        loss = self.criterion(logits, labels)
+        mask = mask.to(torch.float32)
+        loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+        loss.backward()
+        encoder_var_grad = [v.grad for v in encoder_variable]
+        decoder_var_grad = [v.grad for v in decoder_variable]
+        encdec_var_grad = [v.grad for v in encdec_variable]
+
+        encoder_scores = []
+        for var, grad in list(zip(encoder_variable, encoder_var_grad)):
+            if var.dim() == 3:
+                num_heads= self.encoder.layers[i].self_attention.attention.num_heads
+                head_size= self.encoder.layers[i].self_attention.attention.head_size
+                var = var.reshape(var.size(0), var.size(1), num_heads, head_size)
+                grad = grad.reshape(grad.size(0), grad.size(1), num_heads, head_size)
+                score = torch.einsum("blhd,blhd->bhl", var, grad)
+            else:
+                score = torch.einsum("bhld,bhld->bhl", var, grad)
+            score *= features["source_mask"].unsqueeze(1).to(score)
+            score = score.abs().sum(dim=(0, 2)).tolist()
+            encoder_scores.append(score)
+
+        decoder_scores = []
+        for i, (var, grad) in enumerate(list(zip(decoder_variable, decoder_var_grad))):
+            if var.dim() == 3:
+                num_heads= self.decoder.layers[i].self_attention.attention.num_heads
+                head_size= self.decoder.layers[i].self_attention.attention.head_size
+                var = var.reshape(var.size(0), var.size(1), num_heads, head_size)
+                grad = grad.reshape(grad.size(0), grad.size(1), num_heads, head_size)
+                score = torch.einsum("blhd,blhd->bhl", var, grad)
+            else:
+                score = torch.einsum("bhld,bhld->bhl", var, grad)
+            score *= features["target_mask"].unsqueeze(1).to(score)
+            score = score.abs().sum(dim=(0, 2)).tolist()
+            decoder_scores.append(score)
+
+        encdec_scores = []
+        for i, (var, grad) in enumerate(list(zip(encdec_variable, encdec_var_grad))):
+            if var.dim() == 3:
+                num_heads= self.decoder.layers[i].encdec_attention.attention.num_heads
+                head_size= self.decoder.layers[i].encdec_attention.attention.head_size
+                var = var.reshape(var.size(0), var.size(1), num_heads, head_size)
+                grad = grad.reshape(grad.size(0), grad.size(1), num_heads, head_size)
+                score = torch.einsum("blhd,blhd->bhl", var, grad)
+            else:
+                score = torch.einsum("bhld,bhld->bhl", var, grad)
+            score *= features["target_mask"].unsqueeze(1).to(score)
+            score = score.abs().sum(dim=(0, 2)).tolist()
+            encdec_scores.append(score)
+
+        return encdec_scores, decoder_scores, encdec_scores
 
     def forward(self, features, labels, mode="train", level="sentence"):
         mask = features["target_mask"]
