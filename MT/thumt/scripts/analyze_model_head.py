@@ -34,6 +34,8 @@ def parse_args():
     # input files
     parser.add_argument("--input", type=str, required=True, nargs=2,
                         help="Path to input file.")
+    parser.add_argument("--output", type=str, default="",
+                        help="Name of output file.")
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to trained checkpoints.")
     parser.add_argument("--vocabulary", type=str, nargs=2, required=True,
@@ -253,7 +255,8 @@ def main(args):
                     if score <= 0:
                         heads_to_prune["encdec"][layer].append(head)
 
-            with open("heads_to_prune.json", "w") as fp:
+            output_name = args.output if args.output else "heads_to_prune"
+            with open("{}.json".format(output_name), "w") as fp:
                 json.dump(heads_to_prune, fp)
 
         elif args.prune_strategy == "percentage":
@@ -287,7 +290,8 @@ def main(args):
                     if score < threshold:
                         heads_to_prune["encdec"][layer].append(head)
 
-            with open("heads_to_prune.json", "w") as fp:
+            output_name = args.output if args.output else "heads_to_prune"
+            with open("{}.json".format(output_name), "w") as fp:
                 json.dump(heads_to_prune, fp)
 
 # Wrap main function
