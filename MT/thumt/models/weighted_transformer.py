@@ -652,7 +652,7 @@ class WeightedTransformer(modules.Module):
         encdec_var_grad = [v.grad for v in encdec_variable]
 
         encoder_scores = []
-        for var, grad in list(zip(encoder_variable, encoder_var_grad)):
+        for i, (var, grad) in enumerate(list(zip(encoder_variable, encoder_var_grad))):
             if var.dim() == 3:
                 num_heads= self.encoder.layers[i].self_attention.attention.num_heads
                 head_size= self.encoder.layers[i].self_attention.attention.head_size
