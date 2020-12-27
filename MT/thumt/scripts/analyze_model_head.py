@@ -13,6 +13,9 @@ import re
 import six
 import socket
 import glob
+import json
+import numpy as np
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -51,6 +54,11 @@ def parse_args():
     parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
                         choices=["drop_one_bleu", "drop_one_loss", "confidence", "remain_one_loss", "remain_one_bleu", "grad_sensitivity"],
                         help="method to evaluate head importance in head_importance_score")
+    parser.add_argument("--prune_strategy", type=str, default="none",
+                        choices=["none", "improve", "percentage"],
+                        help="method to decide which head to prune in head_importance_score")
+    parser.add_argument("--prune_percentage", type=int, default=0,
+                        help="percentage of head to be pruned in prune_strategy percentage")
     parser.add_argument("--equal_heads", action="store_true", 
                         help="make all head equal in head_importance_score")
     parser.add_argument("--env", type=str, default="",
@@ -221,7 +229,66 @@ def main(args):
         head_scores = utils.head_importance_score(model, args.head_importance_method, 
                                                   dataset, sorted_key, eval_dataset, references, params,
                                                   visualize=True, env=env_name, equal_heads=args.equal_heads)
+        if args.prune_strategy == "improve":
+            if not args.head_importance_method in ["drop_one_bleu", "drop_one_loss"]:
+                raise ValueError("Unsupported method {} for improve".format(args.head_importance_method))
+            encoder_head_scores, decoder_head_scores, encdec_head_scores = head_scores
+            heads_to_prune = {
+                "encoder": {layer: [] for layer, _ in enumerate(encoder_head_scores)},
+                "decoder": {layer: [] for layer, _ in enumerate(decoder_head_scores)},
+                "encdec": {layer: [] for layer, _ in enumerate(encdec_head_scores)}
+                             }
+            for layer, scores in enumerate(encoder_head_scores):
+                for head, score in enumerate(scores):
+                    if score <= 0:
+                        heads_to_prune["encoder"][layer].append(head)
 
+            for layer, score in enumerate(decoder_head_scores):
+                for head, score in enumerate(scores):
+                    if score <= 0:
+                        heads_to_prune["decoder"][layer].append(head)
+
+            for layer, score in enumerate(encdec_head_scores):
+                for head, score in enumerate(scores):
+                    if score <= 0:
+                        heads_to_prune["encdec"][layer].append(head)
+
+            with open("heads_to_prune.json", "w") as fp:
+                json.dump(heads_to_prune, fp)
+
+        elif args.prune_strategy == "percentage":
+            encoder_head_scores, decoder_head_scores, encdec_head_scores = head_scores
+            heads_to_prune = {
+                "encoder": {layer: [] for layer, _ in enumerate(encoder_head_scores)},
+                "decoder": {layer: [] for layer, _ in enumerate(decoder_head_scores)},
+                "encdec": {layer: [] for layer, _ in enumerate(encdec_head_scores)}
+                             }
+            encoder_scores = np.array(encoder_head_scores).reshape(-1)
+            encoder_scores.sort()
+            threshold = encoder_scores[round(encoder_scores.size * args.prune_percentage / 100)]
+            for layer, scores in enumerate(encoder_head_scores):
+                for head, score in enumerate(scores):
+                    if score < threshold:
+                        heads_to_prune["encoder"][layer].append(head)
+
+            decoder_scores = np.array(decoder_head_scores).reshape(-1)
+            decoder_scores.sort()
+            threshold = decoder_scores[round(decoder_scores.size * args.prune_percentage / 100)]
+            for layer, scores in enumerate(decoder_head_scores):
+                for head, score in enumerate(scores):
+                    if score < threshold:
+                        heads_to_prune["decoder"][layer].append(head)
+
+            encdec_scores = np.array(encdec_head_scores).reshape(-1)
+            encdec_scores.sort()
+            threshold = encdec_scores[round(encdec_scores.size * args.prune_percentage / 100)]
+            for layer, scores in enumerate(encdec_head_scores):
+                for head, score in enumerate(scores):
+                    if score < threshold:
+                        heads_to_prune["encdec"][layer].append(head)
+
+            with open("heads_to_prune.json", "w") as fp:
+                json.dump(heads_to_prune, fp)
 
 # Wrap main function
 def process_fn(rank, args):
