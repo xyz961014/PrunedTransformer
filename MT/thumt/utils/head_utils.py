@@ -287,7 +287,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                     elif score_type == "loss":
                         score_wo_head = eval_loss(copy_model, dataset, params)
                         print("loss: {:.3f}".format(score_wo_head))
-                    delta_score = score_wo_head - full_score
+                    delta_score = full_score - score_wo_head
                     if score_type == "bleu":
                         delta_score = -delta_score
                     layer_head_scores.append(delta_score)
@@ -311,7 +311,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                     elif score_type == "loss":
                         score_wo_head = eval_loss(copy_model, dataset, params)
                         print("loss: {:.3f}".format(score_wo_head))
-                    delta_score = score_wo_head - full_score
+                    delta_score = full_score - score_wo_head
                     if score_type == "bleu":
                         delta_score = -delta_score
                     decoder_layer_head_scores.append(delta_score)
@@ -328,7 +328,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                     elif score_type == "loss":
                         score_wo_head = eval_loss(copy_model, dataset, params)
                         print("loss: {:.3f}".format(score_wo_head))
-                    delta_score = score_wo_head - full_score
+                    delta_score = full_score - score_wo_head
                     if score_type == "bleu":
                         delta_score = -delta_score
                     encdec_layer_head_scores.append(delta_score)
