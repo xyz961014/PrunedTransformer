@@ -334,6 +334,7 @@ class WeightedTransformerEncoder(modules.Module):
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
         """
         for layer, heads in heads_to_prune.items():
+            layer = int(layer)
             self.layers[layer].prune_heads(heads)
 
     def forward(self, x, bias):
@@ -387,9 +388,11 @@ class WeightedTransformerDecoder(modules.Module):
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
         """
         for layer, heads in self_heads_to_prune.items():
+            layer = int(layer)
             self.layers[layer].self_prune_heads(heads)
 
         for layer, heads in encdec_heads_to_prune.items():
+            layer = int(layer)
             self.layers[layer].encdec_prune_heads(heads)
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
@@ -511,6 +514,14 @@ class WeightedTransformer(modules.Module):
         for name, var in self.named_parameters():
             if re.search("alpha|kappa", name):
                 var.data = torch.ones_like(var.data)
+
+    def prune_heads(self, heads_to_prune):
+        encoder_heads_to_prune = heads_to_prune["encoder"]
+        decoder_heads_to_prune = heads_to_prune["decoder"]
+        encdec_heads_to_prune = heads_to_prune["encdec"]
+
+        self.encoder._prune_heads(encoder_heads_to_prune)
+        self.decoder._prune_heads(decoder_heads_to_prune, encdec_heads_to_prune)
 
     def encode(self, features, state):
         src_seq = features["source"]

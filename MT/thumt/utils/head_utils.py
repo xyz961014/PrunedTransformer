@@ -393,24 +393,48 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
             vis = visdom.Visdom(env=env)
             assert vis.check_connection()
             
-            vis.heatmap(np.array(encoder_head_scores), win=method + " encoder_heads", 
+            for layer, scores in enumerate(encoder_head_scores):
+                scores = np.concatenate((np.zeros((len(scores), 1)), np.array([scores]).transpose()), axis=1)
+                vis.bar(scores, 
+                        win="{} encoder_layer{} score".format(method, layer), 
                         opts={
-                                "title": method + " encoder_head_scores",
-                                "rownames": ["layer{}".format(l) for l in range(len(model.encoder.layers))],
-                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                                "title": "{} encoder_layer{} score".format(method, layer),
+                                "stacked": False,
                              })
-            vis.heatmap(np.array(decoder_head_scores), win=method + " decoder_heads", 
+            for layer, scores in enumerate(decoder_head_scores):
+                scores = np.concatenate((np.zeros((len(scores), 1)), np.array([scores]).transpose()), axis=1)
+                vis.bar(scores, 
+                        win="{} decoder_layer{} score".format(method, layer), 
                         opts={
-                                "title": method + " decoder_head_scores",
-                                "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
-                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                                "title": "{} decoder_layer{} score".format(method, layer),
+                                "stacked": False,
                              })
-            vis.heatmap(np.array(encdec_head_scores), win=method + " encdec_heads", 
+            for layer, scores in enumerate(encdec_head_scores):
+                scores = np.concatenate((np.zeros((len(scores), 1)), np.array([scores]).transpose()), axis=1)
+                vis.bar(scores, 
+                        win="{} encdec_layer{} score".format(method, layer), 
                         opts={
-                                "title": method + " encdec_head_scores",
-                                "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
-                                "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+                                "title": "{} encdec_layer{} score".format(method, layer),
+                                "stacked": False,
                              })
+            #vis.heatmap(np.array(encoder_head_scores), win=method + " encoder_heads", 
+            #            opts={
+            #                    "title": method + " encoder_head_scores",
+            #                    "rownames": ["layer{}".format(l) for l in range(len(model.encoder.layers))],
+            #                    "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+            #                 })
+            #vis.heatmap(np.array(decoder_head_scores), win=method + " decoder_heads", 
+            #            opts={
+            #                    "title": method + " decoder_head_scores",
+            #                    "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
+            #                    "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+            #                 })
+            #vis.heatmap(np.array(encdec_head_scores), win=method + " encdec_heads", 
+            #            opts={
+            #                    "title": method + " encdec_head_scores",
+            #                    "rownames": ["layer{}".format(l) for l in range(len(model.decoder.layers))],
+            #                    "columnnames": ["head{}".format(h) for h in range(params.num_heads)]
+            #                 })
 
         except:
             print("Visdom does not launch correctly.")
