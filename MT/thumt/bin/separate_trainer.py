@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import six
+import json
 import socket
 import time
 import torch
@@ -56,6 +57,10 @@ def parse_args(args=None):
     # hyperparams
     parser.add_argument("--hparam_set", type=str,
                         help="Name of pre-defined hyper-parameter set.")
+
+    # manually prune or weight
+    parser.add_argument("--prune_json", type=str, default="",
+                        help="json file containing heads to prune")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -467,6 +472,12 @@ def load_references(pattern):
 
     return list(zip(*references))
 
+def prune_model(model, json_file):
+    if json_file and os.path.exists(json_file):
+        with open(json_file) as fp_json:
+            heads_to_prune = json.load(fp_json)
+        model.prune_heads(heads_to_prune)
+
 
 def main(args):
     model_cls = models.get_model(args.model)
@@ -553,6 +564,7 @@ def main(args):
         # Load pre-trained models
         state = torch.load(args.checkpoint, map_location="cpu")
         model.load_state_dict(state["model"])
+        prune_model(model, args.prune_json)
         step = params.initial_step
         additional_step = params.additional_initial_step
         epoch = 0
@@ -563,6 +575,7 @@ def main(args):
         additional_step = state["additional_step"]
         epoch = state["epoch"]
         model.load_state_dict(state["model"])
+        prune_model(model, args.prune_json)
 
         if "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])
@@ -570,6 +583,7 @@ def main(args):
         step = 0
         additional_step = 0
         epoch = 0
+        prune_model(model, args.prune_json)
         broadcast(model)
 
     def train_fn(inputs):
