@@ -48,6 +48,8 @@ def parse_args():
     # manually prune or weight
     parser.add_argument("--prune_json", type=str, default="",
                         help="json file containing heads to prune")
+    parser.add_argument("--prune_first", action="store_true",
+                        help="prune heads before load state dict, used in translate finetuned pruned model")
 
     # mutually exclusive parameters
     group = parser.add_mutually_exclusive_group()
@@ -198,15 +200,22 @@ def main(args):
         if args.half:
             model = model.half()
 
+        if args.prune_first:
+            if args.prune_json and os.path.exists(args.prune_json):
+                with open(args.prune_json) as fp_json:
+                    heads_to_prune = json.load(fp_json)
+                model.prune_heads(heads_to_prune)
+
         model.eval()
         model.load_state_dict(
             torch.load(utils.latest_checkpoint(args.checkpoint),
                        map_location="cpu")["model"])
 
-        if args.prune_json and os.path.exists(args.prune_json):
-            with open(args.prune_json) as fp_json:
-                heads_to_prune = json.load(fp_json)
-            model.prune_heads(heads_to_prune)
+        if not args.prune_first:
+            if args.prune_json and os.path.exists(args.prune_json):
+                with open(args.prune_json) as fp_json:
+                    heads_to_prune = json.load(fp_json)
+                model.prune_heads(heads_to_prune)
 
         if len(args.input) == 1:
             mode = "infer"
