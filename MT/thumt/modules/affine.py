@@ -32,10 +32,11 @@ class Affine(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.weight.numel() > 0:
+            nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
+            bound = 1 / (math.sqrt(fan_in) + 1e-9)
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
@@ -66,10 +67,11 @@ class WeightedAffine(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.weight.numel() > 0:
+            nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
+            bound = 1 / (math.sqrt(fan_in) + 1e-9)
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):

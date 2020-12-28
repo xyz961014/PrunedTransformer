@@ -57,6 +57,12 @@ class AttentionSubLayer(modules.Module):
         else:
             y = x
 
+        if self.attention.num_heads == 0:
+            if self.normalization == "before":
+                return x
+            else:
+                return self.layer_norm(x)
+
         if self.training or state is None:
             y = self.attention(y, bias, memory, None)
         else:
@@ -143,6 +149,18 @@ class WeightedAttentionSubLayer(modules.Module):
             y = self.layer_norm(x)
         else:
             y = x
+
+        if self.attention.num_heads == 0:
+            if self.normalization == "before":
+                if self.enable_alpha:
+                    return x.unsqueeze(1)
+                else:
+                    return x
+            else:
+                if self.enable_alpha:
+                    return self.layer_norm(x.unsqueeze(1))
+                else:
+                    return self.layer_norm(x)
 
         if self.training or state is None:
             y = self.attention(y, bias, memory, None)
