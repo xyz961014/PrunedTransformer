@@ -213,7 +213,9 @@ def main(args):
 
     if args.function == "visualize_head_selection":
         def compute_head_selection_weight(var, name):
-            if re.search("kappa", name):
+            if params.sigmoid_weight:
+                return torch.sigmoid(var)
+            elif re.search("kappa", name):
                 if params.expand_kappa_norm:
                     return F.softmax(var, dim=0) * params.num_heads
                 else:

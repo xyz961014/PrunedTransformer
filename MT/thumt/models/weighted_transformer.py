@@ -115,7 +115,8 @@ class WeightedAttentionSubLayer(modules.Module):
                                                                 params.attention_dropout,
                                                                 enable_kappa=params.enable_kappa,
                                                                 enable_alpha=params.enable_alpha,
-                                                                expand_kappa_norm=params.expand_kappa_norm)
+                                                                expand_kappa_norm=params.expand_kappa_norm,
+                                                                sigmoid_weight=params.sigmoid_weight)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
@@ -225,7 +226,8 @@ class WeightedFFNSubLayer(modules.Module):
                                                          params.num_heads,
                                                          dropout=params.relu_dropout,
                                                          enable_alpha=params.enable_alpha,
-                                                         expand_alpha_norm=params.expand_alpha_norm)
+                                                         expand_alpha_norm=params.expand_alpha_norm,
+                                                         sigmoid_weight=params.sigmoid_weight)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.ffn_layer.additional_params
@@ -467,6 +469,7 @@ class WeightedTransformer(modules.Module):
         self.hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
+        self.sigmoid_l1loss = params.sigmoid_l1loss
         self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
 
@@ -723,6 +726,12 @@ class WeightedTransformer(modules.Module):
         loss = self.criterion(logits, labels)
         mask = mask.to(torch.float32)
 
+        if self.sigmoid_l1loss:
+            l1loss = nn.L1Loss()
+            weight_param = torch.cat(self.additional_params, dim=0)
+            label = torch.ones_like(weight_param).to(weight_param) * 0.5
+            loss = loss - l1loss(torch.sigmoid(weight_param), label)
+
         # Prevent FP16 overflow
         if loss.dtype == torch.float16:
             loss = loss.to(torch.float32)
@@ -783,6 +792,8 @@ class WeightedTransformer(modules.Module):
             enable_kappa=True,
             expand_alpha_norm=True,
             expand_kappa_norm=True,
+            sigmoid_weight=False,
+            sigmoid_l1loss=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

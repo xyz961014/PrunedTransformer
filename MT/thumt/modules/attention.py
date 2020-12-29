@@ -340,7 +340,7 @@ class MultiHeadAdditiveAttention(MultiHeadAttentionBase):
 
 class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, enable_alpha=True, expand_kappa_norm=False,
+    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, enable_alpha=True, expand_kappa_norm=False, sigmoid_weight=False,
                  name="weighted_multihead_attention"):
         super().__init__(name=name)
 
@@ -349,6 +349,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
         self.dropout = dropout
         self.enable_kappa = enable_kappa
         self.enable_alpha = enable_alpha
+        self.sigmoid_weight = sigmoid_weight
         self.expand_kappa_norm = expand_kappa_norm
         self.additional_params = []
 
@@ -420,9 +421,12 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
         if self.enable_kappa and self.enable_alpha:
             # combine kappa weights
-            normalized_kappa = F.softmax(self.kappa, dim=0)
-            if self.expand_kappa_norm:
-                normalized_kappa = normalized_kappa * self.num_heads
+            if self.sigmoid_weight:
+                normalized_kappa = torch.sigmoid(self.kappa)
+            else:
+                normalized_kappa = F.softmax(self.kappa, dim=0)
+                if self.expand_kappa_norm:
+                    normalized_kappa = normalized_kappa * self.num_heads
             x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
             output = self.o_transform(x)
         elif not self.enable_kappa and self.enable_alpha:
@@ -430,9 +434,12 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             output = self.o_transform(x)
         elif self.enable_kappa and not self.enable_alpha:
             # combine kappa weights and combine heads
-            normalized_kappa = F.softmax(self.kappa, dim=0)
-            if self.expand_kappa_norm:
-                normalized_kappa = normalized_kappa * self.num_heads
+            if self.sigmoid_weight:
+                normalized_kappa = torch.sigmoid(self.kappa)
+            else:
+                normalized_kappa = F.softmax(self.kappa, dim=0)
+                if self.expand_kappa_norm:
+                    normalized_kappa = normalized_kappa * self.num_heads
             x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
             output = self.o_transform(self.combine_heads(x))
         else:

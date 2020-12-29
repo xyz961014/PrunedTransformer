@@ -46,7 +46,7 @@ class FeedForward(Module):
 
 class WeightedFeedForward(Module):
 
-    def __init__(self, input_size, hidden_size, num_heads, output_size=None, dropout=0.0, enable_alpha=True, expand_alpha_norm=False,
+    def __init__(self, input_size, hidden_size, num_heads, output_size=None, dropout=0.0, enable_alpha=True, expand_alpha_norm=False, sigmoid_weight=False,
                  name="weighted_feed_forward"):
         super().__init__(name=name)
 
@@ -57,6 +57,7 @@ class WeightedFeedForward(Module):
         self.dropout = dropout
         self.enable_alpha = enable_alpha
         self.expand_alpha_norm = expand_alpha_norm
+        self.sigmoid_weight = sigmoid_weight
         self.additional_params = []
 
         with utils.scope(name):
@@ -76,9 +77,12 @@ class WeightedFeedForward(Module):
         h = F.dropout(h, self.dropout, self.training)
         output = self.output_transform(h)
         if self.enable_alpha:
-            normalized_alpha = F.softmax(self.alpha, dim=0)
-            if self.expand_alpha_norm:
-                normalized_alpha = normalized_alpha * self.num_heads 
+            if self.sigmoid_weight:
+                normalized_alpha = torch.sigmoid(self.alpha)
+            else:
+                normalized_alpha = F.softmax(self.alpha, dim=0)
+                if self.expand_alpha_norm:
+                    normalized_alpha = normalized_alpha * self.num_heads 
             output = torch.einsum("n,bnld->bld", normalized_alpha, output)
         return output
 
