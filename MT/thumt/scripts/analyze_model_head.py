@@ -54,7 +54,8 @@ def parse_args():
     parser.add_argument("--pattern", type=str, default="alpha|kappa",
                         help="pattern to find related parameter in visualize_head_selection")
     parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
-                        choices=["drop_one_bleu", "drop_one_loss", "confidence", "remain_one_loss", "remain_one_bleu", "grad_sensitivity"],
+                        choices=["drop_one_bleu", "drop_one_loss", "confidence", 
+                                 "remain_one_loss", "remain_one_bleu", "grad_sensitivity", "random"],
                         help="method to evaluate head importance in head_importance_score")
     parser.add_argument("--prune_strategy", type=str, default="none",
                         choices=["none", "improve", "percentage"],
@@ -267,24 +268,22 @@ def main(args):
                 "encdec": {layer: [] for layer, _ in enumerate(encdec_head_scores)}
                              }
             encoder_scores = np.array(encoder_head_scores).reshape(-1)
-            encoder_scores.sort()
-            threshold = encoder_scores[round(encoder_scores.size * args.prune_percentage / 100)]
+            decoder_scores = np.array(decoder_head_scores).reshape(-1)
+            encdec_scores = np.array(encdec_head_scores).reshape(-1)
+            scores = np.concatenate((encoder_scores, decoder_scores, encdec_scores))
+            scores.sort()
+            threshold = scores[round(scores.size * args.prune_percentage / 100)]
+
             for layer, scores in enumerate(encoder_head_scores):
                 for head, score in enumerate(scores):
                     if score < threshold:
                         heads_to_prune["encoder"][layer].append(head)
 
-            decoder_scores = np.array(decoder_head_scores).reshape(-1)
-            decoder_scores.sort()
-            threshold = decoder_scores[round(decoder_scores.size * args.prune_percentage / 100)]
             for layer, scores in enumerate(decoder_head_scores):
                 for head, score in enumerate(scores):
                     if score < threshold:
                         heads_to_prune["decoder"][layer].append(head)
 
-            encdec_scores = np.array(encdec_head_scores).reshape(-1)
-            encdec_scores.sort()
-            threshold = encdec_scores[round(encdec_scores.size * args.prune_percentage / 100)]
             for layer, scores in enumerate(encdec_head_scores):
                 for head, score in enumerate(scores):
                     if score < threshold:

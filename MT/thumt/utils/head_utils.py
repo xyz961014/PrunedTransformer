@@ -385,6 +385,14 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
 
         return encoder_head_scores, decoder_head_scores, encdec_head_scores
 
+    def random_score():
+        encoder_head_scores = np.random.rand(len(model.encoder.layers), params.num_heads)
+        decoder_head_scores = np.random.rand(len(model.decoder.layers), params.num_heads)
+        encdec_head_scores = np.random.rand(len(model.decoder.layers), params.num_heads)
+        if visualize:
+            visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores)
+
+        return encoder_head_scores, decoder_head_scores, encdec_head_scores
 
 
     def visualize_head_scores(encoder_head_scores, decoder_head_scores, encdec_head_scores):
@@ -451,5 +459,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
         return remain_one_score(score_type="loss")
     elif method == "grad_sensitivity":
         return grad_sensitivity()
+    elif method == "random":
+        return random_score()
     else:
         raise ValueError("Unkown head score method {}".format(method))
