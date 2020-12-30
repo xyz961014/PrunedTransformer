@@ -137,6 +137,7 @@ def head_importance_score(model, method, dataset, sorted_key, eval_dataset, refe
                           visualize=False, env=None, equal_heads=False):
     # the more important, the larger score it gets
     from thumt.utils.evaluation import evaluate
+    model.eval()
     if equal_heads:
         # make all heads equal
         model.equal_heads()
