@@ -50,6 +50,8 @@ def parse_args():
                         help="json file containing heads to prune")
     parser.add_argument("--prune_first", action="store_true",
                         help="prune heads before load state dict, used in translate finetuned pruned model")
+    parser.add_argument("--weight_npy", type=str, default="",
+                        help="npy file containing head weights")
 
     # mutually exclusive parameters
     group = parser.add_mutually_exclusive_group()
@@ -210,6 +212,9 @@ def main(args):
         model.load_state_dict(
             torch.load(utils.latest_checkpoint(args.checkpoint),
                        map_location="cpu")["model"])
+
+        if args.weight_npy and os.path.exists(args.weight_npy):
+            model.load_kappa_weights(args.weight_npy)
 
         if not args.prune_first:
             if args.prune_json and os.path.exists(args.prune_json):
