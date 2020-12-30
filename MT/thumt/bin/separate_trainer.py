@@ -61,6 +61,8 @@ def parse_args(args=None):
     # manually prune or weight
     parser.add_argument("--prune_json", type=str, default="",
                         help="json file containing heads to prune")
+    parser.add_argument("--weight_npy", type=str, default="",
+                        help="npy file containing head weights")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -564,6 +566,8 @@ def main(args):
         # Load pre-trained models
         state = torch.load(args.checkpoint, map_location="cpu")
         model.load_state_dict(state["model"])
+        if args.weight_npy and os.path.exists(args.weight_npy):
+            model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         step = params.initial_step
         additional_step = params.additional_initial_step
@@ -575,6 +579,8 @@ def main(args):
         additional_step = state["additional_step"]
         epoch = state["epoch"]
         model.load_state_dict(state["model"])
+        if args.weight_npy and os.path.exists(args.weight_npy):
+            model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
 
         if "optimizer" in state:
@@ -583,6 +589,8 @@ def main(args):
         step = 0
         additional_step = 0
         epoch = 0
+        if args.weight_npy and os.path.exists(args.weight_npy):
+            model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         broadcast(model)
 

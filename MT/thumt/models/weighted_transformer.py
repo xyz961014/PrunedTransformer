@@ -7,6 +7,8 @@ from __future__ import print_function
 
 import math
 import re
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -144,6 +146,14 @@ class WeightedAttentionSubLayer(modules.Module):
         self.attention.num_heads = self.attention.num_heads - len(heads)
         self.attention.hidden_size = self.attention.head_size * self.attention.num_heads
 
+    def load_kappa_weights(self, weights):
+        if self.enable_kappa:
+            weights = weights.to(self.attention.kappa)
+            weights = (weights - weights.mean()) / weights.std()
+            self.attention.kappa.requires_grad = False
+            self.attention.kappa.data = weights
+            self.attention.kappa.requires_grad = True
+
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -280,6 +290,9 @@ class WeightedTransformerEncoderLayer(modules.Module):
         self.feed_forward._prune_heads(heads, self.pruned_heads)
         self.pruned_heads = self.pruned_heads.union(heads)
 
+    def load_kappa_weights(self, weights):
+        self.self_attention.load_kappa_weights(weights)
+
     def forward(self, x, bias):
         x = self.self_attention(x, bias)
         x = self.feed_forward(x)
@@ -297,10 +310,8 @@ class WeightedTransformerDecoderLayer(modules.Module):
         super(WeightedTransformerDecoderLayer, self).__init__(name=name)
 
         with utils.scope(name):
-            self.self_attention = AttentionSubLayer(params,
-                                                    name="self_attention")
-            self.encdec_attention = WeightedAttentionSubLayer(params,
-                                                              name="encdec_attention")
+            self.self_attention = AttentionSubLayer(params, name="self_attention")
+            self.encdec_attention = WeightedAttentionSubLayer(params, name="encdec_attention")
             self.feed_forward = WeightedFFNSubLayer(params)
 
         self.self_pruned_heads = set()
@@ -315,6 +326,11 @@ class WeightedTransformerDecoderLayer(modules.Module):
         self.encdec_attention._prune_heads(heads, self.encdec_pruned_heads)
         self.feed_forward._prune_heads(heads, self.encdec_pruned_heads)
         self.encdec_pruned_heads = self.encdec_pruned_heads.union(heads)
+
+    def load_kappa_weights(self, decoder_weights, encdec_weights):
+        if type(self.self_attention) == WeightedAttentionSubLayer:
+            self.self_attention.load_kappa_weights(decoder_weights)
+        self.encdec_attention.load_kappa_weights(encdec_weights)
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         x = self.self_attention(x, attn_bias, state=state)
@@ -356,6 +372,12 @@ class WeightedTransformerEncoder(modules.Module):
         for layer, heads in heads_to_prune.items():
             layer = int(layer)
             self.layers[layer].prune_heads(heads)
+
+    def load_kappa_weights(self, weights):
+        if not weights.size(0) == len(self.layers):
+            raise ValueError("input weights are not compatitable with encoder layers")
+        for i, layer in enumerate(self.layers):
+            layer.load_kappa_weights(weights[i])
 
     def forward(self, x, bias):
         for layer in self.layers:
@@ -414,6 +436,12 @@ class WeightedTransformerDecoder(modules.Module):
         for layer, heads in encdec_heads_to_prune.items():
             layer = int(layer)
             self.layers[layer].encdec_prune_heads(heads)
+
+    def load_kappa_weights(self, decoder_weights, encdec_weights):
+        if not decoder_weights.size(0) == len(self.layers) or not encdec_weights.size(0) == len(self.layers):
+            raise ValueError("input weights are not compatitable with decoder layers")
+        for i, layer in enumerate(self.layers):
+            layer.load_kappa_weights(decoder_weights[i], encdec_weights[i])
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
@@ -543,6 +571,11 @@ class WeightedTransformer(modules.Module):
 
         self.encoder._prune_heads(encoder_heads_to_prune)
         self.decoder._prune_heads(decoder_heads_to_prune, encdec_heads_to_prune)
+
+    def load_kappa_weights(self, weight_npy):
+        encoder_weights, decoder_weights, encdec_weights = np.load(weight_npy)
+        self.encoder.load_kappa_weights(torch.from_numpy(encoder_weights))
+        self.decoder.load_kappa_weights(torch.from_numpy(decoder_weights), torch.from_numpy(encdec_weights))
 
     def encode(self, features, state):
         src_seq = features["source"]

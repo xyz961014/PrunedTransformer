@@ -57,6 +57,8 @@ def parse_args():
                         choices=["drop_one_bleu", "drop_one_loss", "confidence", 
                                  "remain_one_loss", "remain_one_bleu", "grad_sensitivity", "random"],
                         help="method to evaluate head importance in head_importance_score")
+    parser.add_argument("--load_head_scores", type=str, default="",
+                        help="npy file contains head scores")
     parser.add_argument("--prune_strategy", type=str, default="none",
                         choices=["none", "improve", "percentage"],
                         help="method to decide which head to prune in head_importance_score")
@@ -231,9 +233,18 @@ def main(args):
         utils.visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
 
     elif args.function == "head_importance_score":
-        head_scores = utils.head_importance_score(model, args.head_importance_method, 
-                                                  dataset, sorted_key, eval_dataset, references, params,
-                                                  visualize=True, env=env_name, equal_heads=args.equal_heads)
+        if args.load_head_scores and os.path.exists(args.load_head_scores):
+            head_scores = np.load(args.load_head_scores)
+        else:
+            head_scores = utils.head_importance_score(model, args.head_importance_method, 
+                                                      dataset, sorted_key, eval_dataset, references, params,
+                                                      visualize=True, env=env_name, equal_heads=args.equal_heads)
+
+        # save scores in np.array
+        output_name = args.output if args.output else "{}_head_scores".format(args.head_importance_method)
+        np.save(output_name, head_scores)
+
+        # prune heads
         if args.prune_strategy == "improve":
             if not args.head_importance_method in ["drop_one_bleu", "drop_one_loss"]:
                 raise ValueError("Unsupported method {} for improve".format(args.head_importance_method))
