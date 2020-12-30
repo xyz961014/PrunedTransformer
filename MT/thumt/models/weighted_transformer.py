@@ -310,7 +310,7 @@ class WeightedTransformerDecoderLayer(modules.Module):
         super(WeightedTransformerDecoderLayer, self).__init__(name=name)
 
         with utils.scope(name):
-            self.self_attention = AttentionSubLayer(params, name="self_attention")
+            self.self_attention = WeightedAttentionSubLayer(params, name="self_attention")
             self.encdec_attention = WeightedAttentionSubLayer(params, name="encdec_attention")
             self.feed_forward = WeightedFFNSubLayer(params)
 
