@@ -316,7 +316,7 @@ class WeightedTransformerDecoderLayer(modules.Module):
 
         self.self_pruned_heads = set()
         self.encdec_pruned_heads = set()
-        self.additional_params = self.encdec_attention.additional_params + self.feed_forward.additional_params
+        self.additional_params = self.self_attention.additional_params + self.encdec_attention.additional_params + self.feed_forward.additional_params
 
     def self_prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.self_pruned_heads)
