@@ -102,21 +102,19 @@ class AttentionSubLayer(modules.Module):
 
 class WeightedAttentionSubLayer(modules.Module):
 
-    def __init__(self, params, name="weighted_attention"):
+    def __init__(self, params, enable_kappa=True, name="weighted_attention"):
         super(WeightedAttentionSubLayer, self).__init__(name=name)
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
-        self.enable_kappa = params.enable_kappa
-        self.enable_alpha = params.enable_alpha
+        self.enable_kappa = enable_kappa
         self.pruned_heads = set()
 
         with utils.scope(name):
             self.attention = modules.WeightedMultiHeadAttention(params.hidden_size, 
                                                                 params.num_heads, 
                                                                 params.attention_dropout,
-                                                                enable_kappa=params.enable_kappa,
-                                                                enable_alpha=params.enable_alpha,
+                                                                enable_kappa=enable_kappa,
                                                                 expand_kappa_norm=params.expand_kappa_norm,
                                                                 sigmoid_weight=params.sigmoid_weight)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
@@ -163,15 +161,9 @@ class WeightedAttentionSubLayer(modules.Module):
 
         if self.attention.num_heads == 0:
             if self.normalization == "before":
-                if self.enable_alpha:
-                    return x.unsqueeze(1)
-                else:
-                    return x
+                return x
             else:
-                if self.enable_alpha:
-                    return self.layer_norm(x.unsqueeze(1))
-                else:
-                    return self.layer_norm(x)
+                return self.layer_norm(x)
 
         if self.training or state is None:
             y = self.attention(y, bias, memory, None)
@@ -182,16 +174,10 @@ class WeightedAttentionSubLayer(modules.Module):
 
         y = F.dropout(y, self.dropout, self.training)
 
-        if self.enable_alpha:
-            if self.normalization == "before":
-                return x.unsqueeze(1) + y
-            else:
-                return self.layer_norm(x.unsqueeze(1) + y)
+        if self.normalization == "before":
+            return x + y
         else:
-            if self.normalization == "before":
-                return x + y
-            else:
-                return self.layer_norm(x + y)
+            return self.layer_norm(x + y)
 
     def forward_with_head_analysis(self, x, bias, memory=None, state=None, mode=None):
         if self.normalization == "before":
@@ -208,49 +194,26 @@ class WeightedAttentionSubLayer(modules.Module):
 
         y = F.dropout(y, self.dropout, self.training)
 
-        if self.enable_alpha:
-            if self.normalization == "before":
-                return x.unsqueeze(1) + y, head_feature
-            else:
-                return self.layer_norm(x.unsqueeze(1) + y), head_feature
+        if self.normalization == "before":
+            return x + y, head_feature
         else:
-            if self.normalization == "before":
-                return x + y, head_feature
-            else:
-                return self.layer_norm(x + y), head_feature
+            return self.layer_norm(x + y), head_feature
 
 
 
-class WeightedFFNSubLayer(modules.Module):
+class FFNSubLayer(modules.Module):
 
     def __init__(self, params, dtype=None, name="weighted_ffn_layer"):
-        super(WeightedFFNSubLayer, self).__init__(name=name)
+        super(FFNSubLayer, self).__init__(name=name)
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
-        self.enable_alpha = params.enable_alpha
 
         with utils.scope(name):
-            self.ffn_layer = modules.WeightedFeedForward(params.hidden_size,
-                                                         params.filter_size,
-                                                         params.num_heads,
-                                                         dropout=params.relu_dropout,
-                                                         enable_alpha=params.enable_alpha,
-                                                         expand_alpha_norm=params.expand_alpha_norm,
-                                                         sigmoid_weight=params.sigmoid_weight)
+            self.ffn_layer = modules.FeedForward(params.hidden_size,
+                                                 params.filter_size,
+                                                 dropout=params.relu_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
-
-        self.additional_params = self.ffn_layer.additional_params
-
-    def _prune_heads(self, heads, pruned_heads):
-        if len(heads) == 0:
-            return
-        if self.enable_alpha:
-            self.ffn_layer.alpha = prune_vector(self.ffn_layer.alpha, heads, 
-                                                self.ffn_layer.num_heads, pruned_heads)
-        # Update hyper params
-        self.ffn_layer.num_heads = self.ffn_layer.num_heads - len(heads)
-
 
     def forward(self, x):
         if self.normalization == "before":
@@ -261,16 +224,10 @@ class WeightedFFNSubLayer(modules.Module):
         y = self.ffn_layer(y)
         y = F.dropout(y, self.dropout, self.training)
 
-        if self.enable_alpha:
-            if self.normalization == "before":
-                return x.sum(dim=1) + y
-            else:
-                return self.layer_norm(x.sum(dim=1) + y)
+        if self.normalization == "before":
+            return x + y
         else:
-            if self.normalization == "before":
-                return x + y
-            else:
-                return self.layer_norm(x + y)
+            return self.layer_norm(x + y)
 
 
 class WeightedTransformerEncoderLayer(modules.Module):
@@ -279,15 +236,15 @@ class WeightedTransformerEncoderLayer(modules.Module):
         super(WeightedTransformerEncoderLayer, self).__init__(name=name)
 
         with utils.scope(name):
-            self.self_attention = WeightedAttentionSubLayer(params)
-            self.feed_forward = WeightedFFNSubLayer(params)
+            self.self_attention = WeightedAttentionSubLayer(params, 
+                                                            enable_kappa=params.enable_encoder_kappa)
+            self.feed_forward = FFNSubLayer(params)
 
         self.pruned_heads = set()
-        self.additional_params = self.self_attention.additional_params + self.feed_forward.additional_params
+        self.additional_params = self.self_attention.additional_params
 
     def prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.pruned_heads)
-        self.feed_forward._prune_heads(heads, self.pruned_heads)
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def load_kappa_weights(self, weights):
@@ -310,13 +267,17 @@ class WeightedTransformerDecoderLayer(modules.Module):
         super(WeightedTransformerDecoderLayer, self).__init__(name=name)
 
         with utils.scope(name):
-            self.self_attention = WeightedAttentionSubLayer(params, name="self_attention")
-            self.encdec_attention = WeightedAttentionSubLayer(params, name="encdec_attention")
-            self.feed_forward = WeightedFFNSubLayer(params)
+            self.self_attention = WeightedAttentionSubLayer(params,
+                                                            enable_kappa=params.enable_decoder_kappa,
+                                                            name="self_attention")
+            self.encdec_attention = WeightedAttentionSubLayer(params, 
+                                                              enable_kappa=params.enable_encdec_kappa,
+                                                              name="encdec_attention")
+            self.feed_forward = FFNSubLayer(params)
 
         self.self_pruned_heads = set()
         self.encdec_pruned_heads = set()
-        self.additional_params = self.self_attention.additional_params + self.encdec_attention.additional_params + self.feed_forward.additional_params
+        self.additional_params = self.self_attention.additional_params + self.encdec_attention.additional_params
 
     def self_prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.self_pruned_heads)
@@ -324,7 +285,6 @@ class WeightedTransformerDecoderLayer(modules.Module):
 
     def encdec_prune_heads(self, heads):
         self.encdec_attention._prune_heads(heads, self.encdec_pruned_heads)
-        self.feed_forward._prune_heads(heads, self.encdec_pruned_heads)
         self.encdec_pruned_heads = self.encdec_pruned_heads.union(heads)
 
     def load_kappa_weights(self, decoder_weights, encdec_weights):
@@ -456,6 +416,20 @@ class WeightedTransformerDecoder(modules.Module):
 
         return x
 
+    @property
+    def decoder_additional_params(self):
+        decoder_additional_params = []
+        for layer in self.layers:
+            decoder_additional_params += layer.self_attention.additional_params
+        return decoder_additional_params
+
+    @property
+    def encdec_additional_params(self):
+        encdec_additional_params = []
+        for layer in self.layers:
+            encdec_additional_params += layer.encdec_attention.additional_params
+        return encdec_additional_params
+
     def forward_with_head_analysis(self, x, attn_bias, encdec_bias, memory, state=None, mode=None):
         decoder_head_feature = []
         encdec_head_feature = []
@@ -497,7 +471,13 @@ class WeightedTransformer(modules.Module):
         self.hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
+
+        self.sigmoid_weight = params.sigmoid_weight
         self.sigmoid_l1loss = params.sigmoid_l1loss
+        self.encoder_kappa_sum_loss = params.encoder_kappa_sum_loss
+        self.decoder_kappa_sum_loss = params.decoder_kappa_sum_loss
+        self.encdec_kappa_sum_loss = params.encdec_kappa_sum_loss
+
         self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
 
@@ -561,7 +541,7 @@ class WeightedTransformer(modules.Module):
 
     def equal_heads(self):
         for name, var in self.named_parameters():
-            if re.search("alpha|kappa", name):
+            if re.search("kappa", name):
                 var.data = torch.ones_like(var.data)
 
     def prune_heads(self, heads_to_prune):
@@ -765,6 +745,23 @@ class WeightedTransformer(modules.Module):
             label = torch.ones_like(weight_param).to(weight_param) * 0.5
             loss = loss - l1loss(torch.sigmoid(weight_param), label)
 
+        if self.sigmoid_weight:
+            if self.encoder_kappa_sum_loss and len(self.encoder.additional_params) > 0:
+                l1loss = nn.L1Loss()
+                weight_param = torch.cat(self.encoder.additional_params, dim=0)
+                weight_sum = torch.sigmoid(weight_param).sum()
+                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss)
+            if self.decoder_kappa_sum_loss and len(self.decoder.decoder_additional_params) > 0:
+                l1loss = nn.L1Loss()
+                weight_param = torch.cat(self.decoder.decoder_additional_params, dim=0)
+                weight_sum = torch.sigmoid(weight_param).sum()
+                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss)
+            if self.encdec_kappa_sum_loss and len(self.decoder.encdec_additional_params) > 0:
+                l1loss = nn.L1Loss()
+                weight_param = torch.cat(self.decoder.encdec_additional_params, dim=0)
+                weight_sum = torch.sigmoid(weight_param).sum()
+                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss)
+
         # Prevent FP16 overflow
         if loss.dtype == torch.float16:
             loss = loss.to(torch.float32)
@@ -821,12 +818,15 @@ class WeightedTransformer(modules.Module):
             normalization="after",
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
-            enable_alpha=False,
-            enable_kappa=True,
-            expand_alpha_norm=True,
+            enable_encoder_kappa=True,
+            encoder_kappa_sum_loss=0,
+            enable_decoder_kappa=True,
+            decoder_kappa_sum_loss=0,
+            enable_encdec_kappa=True,
+            encdec_kappa_sum_loss=0,
             expand_kappa_norm=True,
-            sigmoid_weight=False,
-            sigmoid_l1loss=False,
+            sigmoid_weight=True,
+            sigmoid_l1loss=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
