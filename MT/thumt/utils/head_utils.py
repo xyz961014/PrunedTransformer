@@ -11,7 +11,7 @@ from tqdm import tqdm
 import thumt.data as data
 
 
-def visualize_head_selection(model, pattern, func=None, env=None):
+def visualize_head_selection(model, pattern, func=None, env=None, step=None):
     """
         Visualize head selection in bar using visdom
         model: model to visualize
@@ -30,6 +30,8 @@ def visualize_head_selection(model, pattern, func=None, env=None):
 
     for name, var in model.named_parameters():
         if re.search(pattern, name):
+            if step is not None:
+                name = "{} at step {}".format(name, step)
             vis.bar(func(var.data, name), win=name, opts={"title": name})
 
 

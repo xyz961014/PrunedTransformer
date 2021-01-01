@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument("--function", type=str, default="visualize_head_selection", 
                         choices=["visualize_head_selection", "head_importance_score"],
                         help="Attention Head analyze function")
-    parser.add_argument("--pattern", type=str, default="alpha|kappa",
+    parser.add_argument("--pattern", type=str, default="kappa",
                         help="pattern to find related parameter in visualize_head_selection")
     parser.add_argument("--head_importance_method", type=str, default="drop_one_loss",
                         choices=["drop_one_bleu", "drop_one_loss", "confidence", 
@@ -214,23 +214,7 @@ def main(args):
     model.load_state_dict(torch.load(checkpoint, map_location="cpu")["model"])
 
     if args.function == "visualize_head_selection":
-        def compute_head_selection_weight(var, name):
-            if params.sigmoid_weight:
-                return torch.sigmoid(var)
-            elif re.search("kappa", name):
-                if params.expand_kappa_norm:
-                    return F.softmax(var, dim=0) * params.num_heads
-                else:
-                    return F.softmax(var, dim=0)
-            elif re.search("alpha", name):
-                if params.expand_alpha_norm:
-                    return F.softmax(var, dim=0) * params.num_heads
-                else:
-                    return F.softmax(var, dim=0)
-            else:
-                return F.softmax(var, dim=0)
-
-        utils.visualize_head_selection(model, args.pattern, func=compute_head_selection_weight, env=env_name)
+        utils.visualize_head_selection(model, args.pattern, func=model.compute_head_selection_weight, env=env_name)
 
     elif args.function == "head_importance_score":
         if args.load_head_scores and os.path.exists(args.load_head_scores):

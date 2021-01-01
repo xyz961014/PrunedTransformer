@@ -465,8 +465,7 @@ class WeightedTransformer(modules.Module):
             self.encoder = WeightedTransformerEncoder(params)
             self.decoder = WeightedTransformerDecoder(params)
 
-        self.criterion = modules.SmoothedCrossEntropyLoss(
-            params.label_smoothing)
+        self.criterion = modules.SmoothedCrossEntropyLoss(params.label_smoothing)
         self.dropout = params.residual_dropout
         self.hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
@@ -477,6 +476,7 @@ class WeightedTransformer(modules.Module):
         self.encoder_kappa_sum_loss = params.encoder_kappa_sum_loss
         self.decoder_kappa_sum_loss = params.decoder_kappa_sum_loss
         self.encdec_kappa_sum_loss = params.encdec_kappa_sum_loss
+        self.env_name = params.env_name
 
         self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
@@ -556,6 +556,12 @@ class WeightedTransformer(modules.Module):
         encoder_weights, decoder_weights, encdec_weights = np.load(weight_npy)
         self.encoder.load_kappa_weights(torch.from_numpy(encoder_weights))
         self.decoder.load_kappa_weights(torch.from_numpy(decoder_weights), torch.from_numpy(encdec_weights))
+
+    def display_weights(self, step):
+        try:
+            utils.visualize_head_selection(self, "kappa", func=self.compute_head_selection_weight, env=self.env_name, step=step)
+        except:
+            print("Visdom displaying weights failed")
 
     def encode(self, features, state):
         src_seq = features["source"]
@@ -750,17 +756,17 @@ class WeightedTransformer(modules.Module):
                 l1loss = nn.L1Loss()
                 weight_param = torch.cat(self.encoder.additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss)
+                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss)
             if self.decoder_kappa_sum_loss and len(self.decoder.decoder_additional_params) > 0:
                 l1loss = nn.L1Loss()
                 weight_param = torch.cat(self.decoder.decoder_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss)
+                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss)
             if self.encdec_kappa_sum_loss and len(self.decoder.encdec_additional_params) > 0:
                 l1loss = nn.L1Loss()
                 weight_param = torch.cat(self.decoder.encdec_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss - l1loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss)
+                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss)
 
         # Prevent FP16 overflow
         if loss.dtype == torch.float16:
@@ -787,6 +793,18 @@ class WeightedTransformer(modules.Module):
         }
 
         return state
+
+    def compute_head_selection_weight(self, var, name):
+        if self.params.sigmoid_weight:
+            return torch.sigmoid(var)
+        elif re.search("kappa", name):
+            if self.params.expand_kappa_norm:
+                return F.softmax(var, dim=0) * params.num_heads
+            else:
+                return F.softmax(var, dim=0)
+        else:
+            return F.softmax(var, dim=0)
+
 
     @staticmethod
     def masking_bias(mask, inf=-1e9):
@@ -827,6 +845,7 @@ class WeightedTransformer(modules.Module):
             expand_kappa_norm=True,
             sigmoid_weight=True,
             sigmoid_l1loss=True,
+            env_name="train",
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

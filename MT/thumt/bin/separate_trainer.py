@@ -54,6 +54,8 @@ def parse_args(args=None):
                         help="Enable mixed-precision training.")
     parser.add_argument("--log_interval", type=int, default=100,
                         help="display interval of steps")
+    parser.add_argument("--display_weights", action="store_true",
+                        help="display weights at display step")
     # hyperparams
     parser.add_argument("--hparam_set", type=str,
                         help="Name of pre-defined hyper-parameter set.")
@@ -666,6 +668,8 @@ def main(args):
                 if step % params.eval_steps == 0:
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
+                    if args.display_weights:
+                        model.display_weights(step)
                     start_time = time.time()
 
                 if step % params.save_checkpoint_steps == 0:
