@@ -472,7 +472,7 @@ class WeightedTransformer(modules.Module):
         self.num_decoder_layers = params.num_decoder_layers
 
         self.sigmoid_weight = params.sigmoid_weight
-        self.sigmoid_l1loss = params.sigmoid_l1loss
+        self.sigmoid_reg_loss = params.sigmoid_reg_loss
         self.encoder_kappa_sum_loss = params.encoder_kappa_sum_loss
         self.decoder_kappa_sum_loss = params.decoder_kappa_sum_loss
         self.encdec_kappa_sum_loss = params.encdec_kappa_sum_loss
@@ -745,28 +745,28 @@ class WeightedTransformer(modules.Module):
         loss = self.criterion(logits, labels)
         mask = mask.to(torch.float32)
 
-        if self.sigmoid_l1loss:
-            l1loss = nn.L1Loss()
+        if self.sigmoid_reg_loss:
+            reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
             weight_param = torch.cat(self.additional_params, dim=0)
             label = torch.ones_like(weight_param).to(weight_param) * 0.5
-            loss = loss - l1loss(torch.sigmoid(weight_param), label)
+            loss = loss - reg_loss(torch.sigmoid(weight_param), label)
 
         if self.sigmoid_weight:
             if self.encoder_kappa_sum_loss and len(self.encoder.additional_params) > 0:
-                l1loss = nn.L1Loss()
+                reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.encoder.additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss)
+                loss = loss + reg_loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss)
             if self.decoder_kappa_sum_loss and len(self.decoder.decoder_additional_params) > 0:
-                l1loss = nn.L1Loss()
+                reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.decoder.decoder_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss)
+                loss = loss + reg_loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss)
             if self.encdec_kappa_sum_loss and len(self.decoder.encdec_additional_params) > 0:
-                l1loss = nn.L1Loss()
+                reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.decoder.encdec_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + l1loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss)
+                loss = loss + reg_loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss)
 
         # Prevent FP16 overflow
         if loss.dtype == torch.float16:
@@ -844,7 +844,7 @@ class WeightedTransformer(modules.Module):
             encdec_kappa_sum_loss=0,
             expand_kappa_norm=True,
             sigmoid_weight=True,
-            sigmoid_l1loss=True,
+            sigmoid_reg_loss="l1",
             env_name="train",
             # Override default parameters
             warmup_steps=4000,
