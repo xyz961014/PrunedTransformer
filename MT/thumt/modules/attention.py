@@ -517,3 +517,151 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             raise ValueError("Unknown initializer %d" % initializer)
 
 
+class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
+
+    def __init__(self, hidden_size, num_heads, dropout=0.0, 
+                 name="selective_multihead_attention"):
+        super().__init__(name=name)
+
+        self.num_heads = num_heads
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.additional_params = []
+
+        head_size = hidden_size // num_heads
+        self.head_size = head_size
+
+        with utils.scope(name):
+            self.q_transform = Affine(hidden_size, hidden_size,
+                                      name="q_transform")
+            self.k_transform = Affine(hidden_size, hidden_size,
+                                      name="k_transform")
+            self.v_transform = Affine(hidden_size, hidden_size,
+                                      name="v_transform")
+            self.o_transform = Affine(hidden_size, hidden_size,
+                                      name="o_transform")
+        self.reset_parameters()
+
+    def forward(self, query, bias, memory=None, kv=None):
+        q = self.q_transform(query)
+
+        if memory is not None:
+            if kv is not None:
+                k, v = kv
+            else:
+                k, v = None, None
+
+            # encoder-decoder attention
+            k = k or self.k_transform(memory)
+            v = v or self.v_transform(memory)
+        else:
+            # self-attention
+            k = self.k_transform(query)
+            v = self.v_transform(query)
+
+            if kv is not None:
+                k = torch.cat([kv[0], k], dim=1)
+                v = torch.cat([kv[1], v], dim=1)
+
+        # split heads
+        qh = self.split_heads(q, self.num_heads)
+        kh = self.split_heads(k, self.num_heads)
+        vh = self.split_heads(v, self.num_heads)
+
+        # scale query
+        qh = qh * (self.hidden_size // self.num_heads) ** -0.5
+
+        # dot-product attention
+        kh = torch.transpose(kh, -2, -1)
+        logits = torch.matmul(qh, kh)
+
+        if bias is not None:
+            logits = logits + bias
+
+        weights = F.dropout(torch.softmax(logits, dim=-1),
+                            p=self.dropout,
+                            training=self.training)
+
+        x = torch.matmul(weights, vh)
+
+        # combine heads
+        output = self.o_transform(self.combine_heads(x))
+
+        if kv is not None:
+            return output, k, v
+
+        return output
+
+    def forward_with_head_analysis(self, query, bias, memory=None, kv=None, mode=None):
+        q = self.q_transform(query)
+
+        if memory is not None:
+            if kv is not None:
+                k, v = kv
+            else:
+                k, v = None, None
+
+            # encoder-decoder attention
+            k = k or self.k_transform(memory)
+            v = v or self.v_transform(memory)
+        else:
+            # self-attention
+            k = self.k_transform(query)
+            v = self.v_transform(query)
+
+            if kv is not None:
+                k = torch.cat([kv[0], k], dim=1)
+                v = torch.cat([kv[1], v], dim=1)
+
+        # split heads
+        qh = self.split_heads(q, self.num_heads)
+        kh = self.split_heads(k, self.num_heads)
+        vh = self.split_heads(v, self.num_heads)
+
+        # scale query
+        qh = qh * (self.hidden_size // self.num_heads) ** -0.5
+
+        # dot-product attention
+        kh = torch.transpose(kh, -2, -1)
+        logits = torch.matmul(qh, kh)
+
+        if bias is not None:
+            logits = logits + bias
+
+        weights = F.dropout(torch.softmax(logits, dim=-1),
+                            p=self.dropout,
+                            training=self.training)
+
+        x = torch.matmul(weights, vh)
+        # combine heads
+        output = self.o_transform(self.combine_heads(x))
+
+        if mode == "confidence":
+            head_feature = weights.max(dim=-1)[0].mean(dim=(0, 2))
+        elif mode == "grad_sensitivity":
+            output.retain_grad()
+            head_feature = output
+        else:
+            raise ValueError("Unknown head analysis mode {}".format(mode))
+
+        if kv is not None:
+            return output, k, v, head_feature
+
+        return output, head_feature
+
+
+    def reset_parameters(self, initializer="uniform_scaling", **kwargs):
+        if initializer == "uniform_scaling":
+            # 6 / (4 * hidden_size) -> 6 / (2 * hidden_size)
+            nn.init.xavier_uniform_(self.q_transform.weight, 2 ** -0.5)
+            nn.init.xavier_uniform_(self.k_transform.weight, 2 ** -0.5)
+            nn.init.xavier_uniform_(self.v_transform.weight, 2 ** -0.5)
+            nn.init.xavier_uniform_(self.o_transform.weight)
+            nn.init.constant_(self.q_transform.bias, 0.0)
+            nn.init.constant_(self.k_transform.bias, 0.0)
+            nn.init.constant_(self.v_transform.bias, 0.0)
+            nn.init.constant_(self.o_transform.bias, 0.0)
+        else:
+            raise ValueError("Unknown initializer %d" % initializer)
+
+

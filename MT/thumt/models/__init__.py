@@ -7,6 +7,7 @@ from __future__ import print_function
 
 import thumt.models.transformer
 import thumt.models.weighted_transformer
+import thumt.models.selective_transformer
 
 
 def get_model(name):
@@ -16,5 +17,7 @@ def get_model(name):
         return thumt.models.transformer.Transformer
     elif name == "weighted_transformer":
         return thumt.models.weighted_transformer.WeightedTransformer
+    elif name == "selective_transformer":
+        return thumt.models.selective_transformer.SelectiveTransformer
     else:
         raise LookupError("Unknown model %s" % name)
