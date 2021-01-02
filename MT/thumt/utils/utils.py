@@ -11,7 +11,7 @@ def param_in(p, params):
 def get_reg_loss(name):
     REG_LOSS_DICT = {
             "l1": nn.L1Loss(),
-            "smoothl1": nn.SmoothL1Loss(),
+            "smoothl1": nn.SmoothL1Loss(beta=0.1),
             "l2": nn.MSELoss()
                     }
     return REG_LOSS_DICT[name]
