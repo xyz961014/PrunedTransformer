@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import thumt.utils as utils
 
 from thumt.modules.module import Module
-from thumt.modules.affine import Affine, WeightedAffine
+from thumt.modules.affine import Affine
 
 
 class Attention(Module):
@@ -557,14 +557,6 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                                       name="v_transform")
             self.o_transform = Affine(attention_hidden_size, hidden_size,
                                       name="o_transform")
-            if input_aware_select:
-                self.select_transform = Affine(hidden_size, self.num_heads,
-                                               name="select_transform")
-                self.additional_params += list(self.select_transform.parameters())
-            else:
-                self.kappa = nn.Parameter(torch.empty(num_heads))
-                self.add_name(self.kappa, "kappa")
-                self.additional_params.append(self.kappa)
 
         self.reset_parameters()
 
@@ -729,12 +721,8 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
             nn.init.constant_(self.k_transform.bias, 0.0)
             nn.init.constant_(self.v_transform.bias, 0.0)
             nn.init.constant_(self.o_transform.bias, 0.0)
-            if self.input_aware_select:
-                nn.init.xavier_uniform_(self.select_transform.weight, 2 ** -0.5)
-                nn.init.constant_(self.select_transform.bias, 0.0)
-            else:
-                nn.init.constant_(self.kappa, 0.0)
         else:
             raise ValueError("Unknown initializer %d" % initializer)
+
 
 

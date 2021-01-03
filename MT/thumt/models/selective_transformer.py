@@ -16,6 +16,8 @@ import torch.nn.functional as F
 import thumt.utils as utils
 import thumt.modules as modules
 from thumt.utils import prune_linear_layer, prune_vector
+from thumt.modules.affine import Affine
+
 
 class AttentionSubLayer(modules.Module):
 
@@ -226,6 +228,8 @@ class SelectiveTransformerEncoderLayer(modules.Module):
     def __init__(self, params, name="selective_encoder_layer", shared_layer=None):
         super(SelectiveTransformerEncoderLayer, self).__init__(name=name)
 
+        self.params = params
+
         with utils.scope(name):
             if shared_layer is not None and params.shared_layer_params:
                 self.self_attention = shared_layer.self_attention
@@ -235,13 +239,38 @@ class SelectiveTransformerEncoderLayer(modules.Module):
                 self.feed_forward = FFNSubLayer(params)
 
         self.pruned_heads = set()
-        self.additional_params = self.self_attention.additional_params
+        self.additional_params = []
+        self.build_additional_params(params)
+
+    def build_additional_params(self, params):
+        with utils.scope(self.name):
+            if params.input_aware_select:
+                self.select_transform = Affine(params.hidden_size, params.num_heads,
+                                               name="select_transform")
+                self.additional_params += list(self.select_transform.parameters())
+            else:
+                self.kappa = nn.Parameter(torch.empty(params.num_heads))
+                self.add_name(self.kappa, "kappa")
+                self.additional_params.append(self.kappa)
+
+        if params.input_aware_select:
+            nn.init.xavier_uniform_(self.select_transform.weight, 2 ** -0.5)
+            nn.init.constant_(self.select_transform.bias, 0.0)
+        else:
+            nn.init.constant_(self.kappa, 0.0)
+
+    def load_additional_params(self):
+        if self.params.input_aware_select:
+            self.self_attention.attention.select_transform = self.select_transform
+        else:
+            self.self_attention.attention.kappa = self.kappa
 
     def prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.pruned_heads)
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def forward(self, x, bias):
+        self.load_additional_params()
         x = self.self_attention(x, bias)
         x = self.feed_forward(x)
         return x
@@ -257,6 +286,8 @@ class SelectiveTransformerDecoderLayer(modules.Module):
     def __init__(self, params, name="selective_decoder_layer", shared_layer=None):
         super(SelectiveTransformerDecoderLayer, self).__init__(name=name)
 
+        self.params = params
+
         with utils.scope(name):
             if shared_layer is not None and params.shared_layer_params:
                 self.self_attention = shared_layer.self_attention
@@ -271,7 +302,42 @@ class SelectiveTransformerDecoderLayer(modules.Module):
 
         self.self_pruned_heads = set()
         self.encdec_pruned_heads = set()
-        self.additional_params = self.self_attention.additional_params + self.encdec_attention.additional_params
+        self.additional_params = []
+        self.build_additional_params(params)
+
+    def build_additional_params(self, params):
+        with utils.scope(self.name):
+            if params.input_aware_select:
+                self.self_select_transform = Affine(params.hidden_size, params.num_heads,
+                                               name="self_select_transform")
+                self.encdec_select_transform = Affine(params.hidden_size, params.num_heads,
+                                               name="encdec_select_transform")
+                self.additional_params += list(self.self_select_transform.parameters())
+                self.additional_params += list(self.encdec_select_transform.parameters())
+            else:
+                self.self_kappa = nn.Parameter(torch.empty(params.num_heads))
+                self.add_name(self.self_kappa, "self_kappa")
+                self.encdec_kappa = nn.Parameter(torch.empty(params.num_heads))
+                self.add_name(self.encdec_kappa, "encdec_kappa")
+                self.additional_params.append(self.self_kappa)
+                self.additional_params.append(self.encdec_kappa)
+
+        if params.input_aware_select:
+            nn.init.xavier_uniform_(self.self_select_transform.weight, 2 ** -0.5)
+            nn.init.xavier_uniform_(self.encdec_select_transform.weight, 2 ** -0.5)
+            nn.init.constant_(self.self_select_transform.bias, 0.0)
+            nn.init.constant_(self.encdec_select_transform.bias, 0.0)
+        else:
+            nn.init.constant_(self.self_kappa, 0.0)
+            nn.init.constant_(self.encdec_kappa, 0.0)
+ 
+    def load_additional_params(self):
+        if self.params.input_aware_select:
+            self.self_attention.attention.select_transform = self.self_select_transform
+            self.encdec_attention.attention.select_transform = self.encdec_select_transform
+        else:
+            self.self_attention.attention.kappa = self.self_kappa
+            self.encdec_attention.attention.kappa = self.encdec_kappa
 
     def self_prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.self_pruned_heads)
@@ -282,6 +348,7 @@ class SelectiveTransformerDecoderLayer(modules.Module):
         self.encdec_pruned_heads = self.encdec_pruned_heads.union(heads)
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
+        self.load_additional_params()
         x = self.self_attention(x, attn_bias, state=state)
         x = self.encdec_attention(x, encdec_bias, memory)
         x = self.feed_forward(x)
