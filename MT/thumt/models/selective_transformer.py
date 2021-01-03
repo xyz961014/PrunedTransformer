@@ -111,7 +111,8 @@ class SelectiveAttentionSubLayer(modules.Module):
 
         with utils.scope(name):
             self.attention = modules.SelectiveMultiHeadAttention(
-                    params.hidden_size, 
+                    params.hidden_size,
+                    params.head_size, 
                     params.num_heads, 
                     params.attention_dropout,
                     input_aware_select=params.input_aware_select,
@@ -765,6 +766,7 @@ class SelectiveTransformer(modules.Module):
             hidden_size=512,
             filter_size=2048,
             num_heads=8,
+            head_size=64,
             num_encoder_layers=6,
             num_decoder_layers=6,
             attention_dropout=0.0,

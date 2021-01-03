@@ -522,7 +522,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
 class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0, 
+    def __init__(self, hidden_size, head_size, num_heads, dropout=0.0, 
                  input_aware_select=False,
                  select_weight_function="sigmoid",
                  select_method="soft",
@@ -530,6 +530,8 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                  name="selective_multihead_attention"):
         super().__init__(name=name)
 
+        self.hidden_size = hidden_size
+        self.head_size = head_size
         self.num_heads = num_heads
         self.dropout = dropout
         
@@ -539,9 +541,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
 
         self.additional_params = []
 
-        head_size = hidden_size // num_heads
-        self.head_size = head_size
-        self.hidden_size = head_size * self.select_number
+        attention_hidden_size  = head_size * num_heads
 
         if select_weight_function == "sigmoid":
             self.compute_weight = torch.sigmoid
@@ -549,13 +549,13 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
             self.compute_weight = lambda x: F.softmax(x, dim=0)
 
         with utils.scope(name):
-            self.q_transform = Affine(hidden_size, hidden_size,
+            self.q_transform = Affine(hidden_size, attention_hidden_size,
                                       name="q_transform")
-            self.k_transform = Affine(hidden_size, hidden_size,
+            self.k_transform = Affine(hidden_size, attention_hidden_size,
                                       name="k_transform")
-            self.v_transform = Affine(hidden_size, hidden_size,
+            self.v_transform = Affine(hidden_size, attention_hidden_size,
                                       name="v_transform")
-            self.o_transform = Affine(hidden_size, hidden_size,
+            self.o_transform = Affine(attention_hidden_size, hidden_size,
                                       name="o_transform")
             if input_aware_select:
                 self.select_transform = Affine(hidden_size, self.num_heads,
