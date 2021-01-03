@@ -477,9 +477,12 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
         if self.enable_kappa:
             # combine kappa weights and combine heads
-            normalized_kappa = F.softmax(self.kappa, dim=0)
-            if self.expand_kappa_norm:
-                normalized_kappa = normalized_kappa * self.num_heads
+            if self.sigmoid_weight:
+                normalized_kappa = torch.sigmoid(self.kappa)
+            else:
+                normalized_kappa = F.softmax(self.kappa, dim=0)
+                if self.expand_kappa_norm:
+                    normalized_kappa = normalized_kappa * self.num_heads
             x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
             output = self.o_transform(self.combine_heads(x))
         else:
@@ -520,16 +523,30 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
 
     def __init__(self, hidden_size, num_heads, dropout=0.0, 
+                 input_aware_select=False,
+                 select_weight_function="sigmoid",
+                 select_method="soft",
+                 select_number=0,
                  name="selective_multihead_attention"):
         super().__init__(name=name)
 
         self.num_heads = num_heads
-        self.hidden_size = hidden_size
         self.dropout = dropout
+        
+        self.input_aware_select = input_aware_select
+        self.select_method = select_method
+        self.select_number = select_number if select_number > 0 else num_heads
+
         self.additional_params = []
 
         head_size = hidden_size // num_heads
         self.head_size = head_size
+        self.hidden_size = head_size * self.select_number
+
+        if select_weight_function == "sigmoid":
+            self.compute_weight = torch.sigmoid
+        elif select_weight_function == "softmax":
+            self.compute_weight = lambda x: F.softmax(x, dim=0)
 
         with utils.scope(name):
             self.q_transform = Affine(hidden_size, hidden_size,
@@ -540,10 +557,60 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                                       name="v_transform")
             self.o_transform = Affine(hidden_size, hidden_size,
                                       name="o_transform")
+            if input_aware_select:
+                self.select_transform = Affine(hidden_size, self.num_heads,
+                                               name="select_transform")
+                self.additional_params += list(self.select_transform.parameters())
+            else:
+                self.kappa = nn.Parameter(torch.empty(num_heads))
+                self.add_name(self.kappa, "kappa")
+                self.additional_params.append(self.kappa)
+
         self.reset_parameters()
 
+    def select_head(self, query):
+        if self.input_aware_select:
+            # compute on batch and token level mean of input
+            weights = self.select_transform(query.mean(dim=(0, 1)))
+            self.weights = self.compute_weight(weights)
+        else:
+            self.weights = self.compute_weight(self.kappa)
+
+        if self.select_method == "hard":
+
+            if self.select_number < self.num_heads:
+                self.weights, selected_heads = self.weights.topk(k=self.select_number,
+                                                                 sorted=False)
+                heads = set(h for h in range(self.num_heads))
+                selected_heads = set(selected_heads.tolist())
+                remove_heads = heads - selected_heads
+                remove_heads = list(remove_heads)
+            else:
+                remove_heads = []
+
+            _, index = utils.find_pruneable_heads_and_indices(
+                remove_heads, 
+                self.num_heads, 
+                self.head_size, 
+                set()
+            )
+            self.selected_q_transform = utils.selected_linear(self.q_transform, index)
+            self.selected_k_transform = utils.selected_linear(self.k_transform, index)
+            self.selected_v_transform = utils.selected_linear(self.v_transform, index)
+            self.selected_o_transform = utils.selected_linear(self.o_transform, index,
+                                                              dim=1)
+        elif self.select_method == "soft":
+            self.selected_q_transform = self.q_transform
+            self.selected_k_transform = self.k_transform
+            self.selected_v_transform = self.v_transform
+            self.selected_o_transform = self.o_transform
+        else:
+            raise ValueError("Unsupported select method {}".format(self.select_method))
+
     def forward(self, query, bias, memory=None, kv=None):
-        q = self.q_transform(query)
+        self.select_head(query)
+
+        q = self.selected_q_transform(query)
 
         if memory is not None:
             if kv is not None:
@@ -552,24 +619,24 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                 k, v = None, None
 
             # encoder-decoder attention
-            k = k or self.k_transform(memory)
-            v = v or self.v_transform(memory)
+            k = k or self.selected_k_transform(memory)
+            v = v or self.selected_v_transform(memory)
         else:
             # self-attention
-            k = self.k_transform(query)
-            v = self.v_transform(query)
+            k = self.selected_k_transform(query)
+            v = self.selected_v_transform(query)
 
             if kv is not None:
                 k = torch.cat([kv[0], k], dim=1)
                 v = torch.cat([kv[1], v], dim=1)
 
         # split heads
-        qh = self.split_heads(q, self.num_heads)
-        kh = self.split_heads(k, self.num_heads)
-        vh = self.split_heads(v, self.num_heads)
+        qh = self.split_heads(q, self.select_number)
+        kh = self.split_heads(k, self.select_number)
+        vh = self.split_heads(v, self.select_number)
 
         # scale query
-        qh = qh * (self.hidden_size // self.num_heads) ** -0.5
+        qh = qh * (self.hidden_size // self.select_number) ** -0.5
 
         # dot-product attention
         kh = torch.transpose(kh, -2, -1)
@@ -583,9 +650,10 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                             training=self.training)
 
         x = torch.matmul(weights, vh)
+        x = torch.einsum("n,bnld->bnld", self.weights, x)
 
         # combine heads
-        output = self.o_transform(self.combine_heads(x))
+        output = self.selected_o_transform(self.combine_heads(x))
 
         if kv is not None:
             return output, k, v
@@ -661,6 +729,11 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
             nn.init.constant_(self.k_transform.bias, 0.0)
             nn.init.constant_(self.v_transform.bias, 0.0)
             nn.init.constant_(self.o_transform.bias, 0.0)
+            if self.input_aware_select:
+                nn.init.xavier_uniform_(self.select_transform.weight, 2 ** -0.5)
+                nn.init.constant_(self.select_transform.bias, 0.0)
+            else:
+                nn.init.constant_(self.kappa, 0.0)
         else:
             raise ValueError("Unknown initializer %d" % initializer)
 

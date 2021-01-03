@@ -56,7 +56,7 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0):
         if dim == 1:
             b = layer.bias.clone().detach()
         else:
-            b = layer.bias[index].clone().detach()
+            b = layer.bias.index_select(dim, index).clone().detach()
     new_size = list(layer.weight.size())
     new_size[dim] = len(index)
     if type(layer) == Affine:
@@ -74,6 +74,20 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0):
         new_layer.bias.copy_(b.contiguous())
         new_layer.bias.requires_grad = True
     return new_layer
+
+
+def selected_linear(layer, index, dim=0):
+
+    index = index.to(layer.weight.device)
+    W = layer.weight.index_select(dim, index)
+    if layer.bias is not None:
+        if dim == 1:
+            b = layer.bias
+        else:
+            b = layer.bias.index_select(dim, index)
+
+    return lambda x: F.linear(x, W, bias=b if layer.bias is not None else None)
+
 
 def prune_vector(vector: torch.nn.Parameter, heads: Set[int], n_heads: int, already_pruned_heads: Set[int]) -> torch.nn.Parameter:
     """
@@ -120,6 +134,7 @@ def find_pruneable_heads_and_indices(
     mask = mask.view(-1).contiguous().eq(1)
     index: torch.LongTensor = torch.arange(len(mask))[mask].long()
     return heads, index
+
 
 def eval_loss(model, dataset, params):
     total_loss = 0.

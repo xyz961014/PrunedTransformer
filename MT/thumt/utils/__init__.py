@@ -8,3 +8,4 @@ from thumt.utils.convert_params import params_to_vec, vec_to_params
 from thumt.utils.utils import param_in, get_reg_loss
 from thumt.utils.head_utils import visualize_head_selection, head_importance_score
 from thumt.utils.head_utils import prune_linear_layer, prune_vector, find_pruneable_heads_and_indices
+from thumt.utils.head_utils import selected_linear
