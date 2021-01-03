@@ -111,8 +111,8 @@ class SelectiveAttentionSubLayer(modules.Module):
 
         with utils.scope(name):
             self.attention = modules.SelectiveMultiHeadAttention(params.hidden_size, 
-                                                                params.num_heads, 
-                                                                params.attention_dropout)
+                                                                 params.num_heads, 
+                                                                 params.attention_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
@@ -769,6 +769,9 @@ class SelectiveTransformer(modules.Module):
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
             shared_layer_params=False,
+            input_relative_select=False,
+            select_weight_function="sigmoid",
+            select_method="hard",
             env_name="train",
             # Override default parameters
             warmup_steps=4000,
