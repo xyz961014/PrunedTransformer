@@ -539,9 +539,10 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
         self.select_method = select_method
         self.select_number = select_number if select_number > 0 else num_heads
 
-        self.additional_params = []
+        self.additional_params = {}
 
         attention_hidden_size  = head_size * num_heads
+        self.intermediate_size = self.select_number * head_size
 
         if select_weight_function == "sigmoid":
             self.compute_weight = torch.sigmoid
@@ -563,10 +564,10 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
     def select_head(self, query):
         if self.input_aware_select:
             # compute on batch and token level mean of input
-            weights = self.select_transform(query.mean(dim=(0, 1)))
+            weights = self.additional_param["select_transform"](query.mean(dim=(0, 1)))
             self.weights = self.compute_weight(weights)
         else:
-            self.weights = self.compute_weight(self.kappa)
+            self.weights = self.compute_weight(self.additional_params["kappa"])
 
         if self.select_method == "hard":
 

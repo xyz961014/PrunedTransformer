@@ -260,10 +260,12 @@ class SelectiveTransformerEncoderLayer(modules.Module):
             nn.init.constant_(self.kappa, 0.0)
 
     def load_additional_params(self):
+        additional_params_dict = dict()
         if self.params.input_aware_select:
-            self.self_attention.attention.select_transform = self.select_transform
+            additional_params_dict["select_transform"] = self.select_transform
         else:
-            self.self_attention.attention.kappa = self.kappa
+            additional_params_dict["kappa"] = self.kappa
+        self.self_attention.attention.additional_params = additional_params_dict
 
     def prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.pruned_heads)
@@ -332,12 +334,16 @@ class SelectiveTransformerDecoderLayer(modules.Module):
             nn.init.constant_(self.encdec_kappa, 0.0)
  
     def load_additional_params(self):
+        additional_self_params_dict = dict()
+        additional_encdec_params_dict = dict()
         if self.params.input_aware_select:
-            self.self_attention.attention.select_transform = self.self_select_transform
-            self.encdec_attention.attention.select_transform = self.encdec_select_transform
+            additional_self_params_dict["select_transform"] = self.self_select_transform
+            additional_encdec_params_dict["select_transform"] = self.encdec_select_transform
         else:
-            self.self_attention.attention.kappa = self.self_kappa
-            self.encdec_attention.attention.kappa = self.encdec_kappa
+            additional_self_params_dict["kappa"] = self.self_kappa
+            additional_encdec_params_dict["kappa"] = self.self_kappa
+        self.self_attention.attention.additional_params = additional_self_params_dict
+        self.encdec_attention.attention.additional_params = additional_encdec_params_dict
 
     def self_prune_heads(self, heads):
         self.self_attention._prune_heads(heads, self.self_pruned_heads)
@@ -798,9 +804,9 @@ class SelectiveTransformer(modules.Module):
         state = {
             "decoder": {
                 "layer_%d" % i: {
-                    "k": torch.zeros([batch_size, 0, layer.self_attention.attention.hidden_size],
+                    "k": torch.zeros([batch_size, 0, layer.self_attention.attention.intermediate_size],
                                      device=device),
-                    "v": torch.zeros([batch_size, 0, layer.self_attention.attention.hidden_size],
+                    "v": torch.zeros([batch_size, 0, layer.self_attention.attention.intermediate_size],
                                      device=device)
                 } for i, layer in enumerate(self.decoder.layers)
             }
