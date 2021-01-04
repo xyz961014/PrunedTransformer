@@ -579,6 +579,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                 remove_heads = list(remove_heads)
             else:
                 remove_heads = []
+            self.weights = torch.ones_like(self.weights) - self.weights.detach() + self.weights
 
             _, index = utils.find_pruneable_heads_and_indices(
                 remove_heads, 

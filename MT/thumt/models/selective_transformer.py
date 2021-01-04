@@ -844,6 +844,7 @@ class SelectiveTransformer(modules.Module):
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
             shared_layer_params=False,
+            # select settings
             input_aware_select=False,
             select_weight_function="sigmoid",
             select_method="hard",
