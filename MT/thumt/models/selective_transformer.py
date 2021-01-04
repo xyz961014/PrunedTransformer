@@ -381,6 +381,8 @@ class SelectiveTransformerEncoder(modules.Module):
                     SelectiveTransformerEncoderLayer(params, name="layer_%d" % i,
                                                      shared_layer=shared_layer)
                     for i in range(params.num_encoder_layers)])
+                if not params.input_aware_select and params.ordered_init_kappa:
+                    self.ordered_init_kappa(params)
             else:
                 self.layers = nn.ModuleList([
                     SelectiveTransformerEncoderLayer(params, name="layer_%d" % i)
@@ -393,6 +395,18 @@ class SelectiveTransformerEncoder(modules.Module):
         self.additional_params = []
         for layer in self.layers:
             self.additional_params += layer.additional_params
+
+    def ordered_init_kappa(self, params):
+        select_number = params.select_number if params.select_number > 0 else params.num_heads
+        layer_num = len(self.layers)
+        kappa_len = params.num_heads
+        if kappa_len - select_number >= layer_num - 1:
+            interval = (kappa_len - select_number) // (layer_num - 1)
+            for i, layer in enumerate(self.layers):
+                layer.kappa.requires_grad = False
+                for ind in range(i * interval, i * interval + select_number):
+                    layer.kappa[ind] = 1.0
+                layer.kappa.requires_grad = True
 
     def _prune_heads(self, heads_to_prune):
         """
@@ -441,6 +455,8 @@ class SelectiveTransformerDecoder(modules.Module):
                     SelectiveTransformerDecoderLayer(params, name="layer_%d" % i,
                                                      shared_layer=shared_layer)
                     for i in range(params.num_encoder_layers)])
+                if not params.input_aware_select and params.ordered_init_kappa:
+                    self.ordered_init_kappa(params)
             else:
                 self.layers = nn.ModuleList([
                     SelectiveTransformerDecoderLayer(params, name="layer_%d" % i)
@@ -454,6 +470,22 @@ class SelectiveTransformerDecoder(modules.Module):
         self.additional_params = []
         for layer in self.layers:
             self.additional_params += layer.additional_params
+
+    def ordered_init_kappa(self, params):
+        select_number = params.select_number if params.select_number > 0 else params.num_heads
+        layer_num = len(self.layers)
+        kappa_len = params.num_heads
+        if kappa_len - select_number >= layer_num - 1:
+            interval = (kappa_len - select_number) // (layer_num - 1)
+            for i, layer in enumerate(self.layers):
+                layer.self_kappa.requires_grad = False
+                layer.encdec_kappa.requires_grad = False
+                for ind in range(i * interval, i * interval + select_number):
+                    layer.self_kappa[ind] = 1.0
+                    layer.encdec_kappa[ind] = 1.0
+                layer.self_kappa.requires_grad = True
+                layer.encdec_kappa.requires_grad = True
+
 
     def _prune_heads(self, self_heads_to_prune, encdec_heads_to_prune):
         """
@@ -855,6 +887,7 @@ class SelectiveTransformer(modules.Module):
             select_weight_function="sigmoid",
             select_method="hard",
             select_number=0,
+            ordered_init_kappa=False,
             env_name="train",
             # Override default parameters
             warmup_steps=4000,
