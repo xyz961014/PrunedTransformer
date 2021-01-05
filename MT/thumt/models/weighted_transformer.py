@@ -563,6 +563,51 @@ class WeightedTransformer(modules.Module):
         except:
             print("Visdom displaying weights failed")
 
+    def summary_weights(self, summary, step, accumulate_steps=100):
+        # summary mean in step interval
+        if not hasattr(self, "weights"):
+            self.weights = {
+                    "encoder": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                                for i in range(len(self.encoder.layers))},
+                    "decoder": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                                for i in range(len(self.decoder.layers))},
+                    "encdec": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                               for i in range(len(self.decoder.layers))},
+                           }
+
+        for layer_i, layer in enumerate(self.encoder.layers):
+            weights = self.compute_head_selection_weight(layer.self_attention.attention.kappa, "kappa").tolist()
+            for head_i, w in enumerate(weights):
+                summary.scalar("encoder layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["encoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["encoder"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["encoder"]["layer_{}".format(layer_i)][head_i] += w
+
+        for layer_i, layer in enumerate(self.decoder.layers):
+            self_weights = self.compute_head_selection_weight(layer.self_attention.attention.kappa, "kappa").tolist()
+            encdec_weights = self.compute_head_selection_weight(layer.encdec_attention.attention.kappa, "kappa").tolist()
+            for head_i, w in enumerate(self_weights):
+                summary.scalar("decoder layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["decoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["decoder"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["decoder"]["layer_{}".format(layer_i)][head_i] += w
+            for head_i, w in enumerate(encdec_weights):
+                summary.scalar("encdec layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["encdec"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["encdec"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["encdec"]["layer_{}".format(layer_i)][head_i] += w
+
+
+
     def encode(self, features, state):
         src_seq = features["source"]
         src_mask = features["source_mask"]
@@ -756,18 +801,18 @@ class WeightedTransformer(modules.Module):
                 sum_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.encoder.additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss) * self.params.sum_loss_beta
+                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.encoder_kappa_sum_loss) * self.params.reg_loss_alpha
             if self.decoder_kappa_sum_loss and len(self.decoder.decoder_additional_params) > 0:
                 sum_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.decoder.decoder_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss) * self.params.sum_loss_beta
+                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.decoder_kappa_sum_loss) * self.params.reg_loss_alpha
 
             if self.encdec_kappa_sum_loss and len(self.decoder.encdec_additional_params) > 0:
                 sum_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
                 weight_param = torch.cat(self.decoder.encdec_additional_params, dim=0)
                 weight_sum = torch.sigmoid(weight_param).sum()
-                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss) * self.params.sum_loss_beta
+                loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss) * self.params.reg_loss_alpha
 
 
         # Prevent FP16 overflow
@@ -848,7 +893,6 @@ class WeightedTransformer(modules.Module):
             sigmoid_weight=True,
             sigmoid_reg_loss="l1",
             reg_loss_alpha=0.1,
-            sum_loss_beta=0.05,
             env_name="train",
             # Override default parameters
             warmup_steps=4000,

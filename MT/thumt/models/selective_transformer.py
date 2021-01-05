@@ -638,6 +638,50 @@ class SelectiveTransformer(modules.Module):
         self.encoder._prune_heads(encoder_heads_to_prune)
         self.decoder._prune_heads(decoder_heads_to_prune, encdec_heads_to_prune)
 
+    def summary_weights(self, summary, step, accumulate_steps=100):
+        # summary mean in step interval
+        if not hasattr(self, "weights"):
+            self.weights = {
+                    "encoder": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                                for i in range(len(self.encoder.layers))},
+                    "decoder": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                                for i in range(len(self.decoder.layers))},
+                    "encdec": {"layer_{}".format(i): [0. for j in range(self.params.num_heads)] 
+                               for i in range(len(self.decoder.layers))},
+                           }
+
+        for layer_i, layer in enumerate(self.encoder.layers):
+            weights = layer.self_attention.attention.weights.tolist()
+            for head_i, w in enumerate(weights):
+                summary.scalar("encoder layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["encoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["encoder"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["encoder"]["layer_{}".format(layer_i)][head_i] += w
+
+        for layer_i, layer in enumerate(self.decoder.layers):
+            self_weights = layer.self_attention.attention.weights.tolist()
+            encdec_weights = layer.encdec_attention.attention.weights.tolist()
+            for head_i, w in enumerate(self_weights):
+                summary.scalar("decoder layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["decoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["decoder"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["decoder"]["layer_{}".format(layer_i)][head_i] += w
+            for head_i, w in enumerate(encdec_weights):
+                summary.scalar("encdec layer_{} head_{}".format(layer_i, head_i), 
+                               self.weights["encdec"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
+                               step)
+                if step % accumulate_steps == 0:
+                    self.weights["encdec"]["layer_{}".format(layer_i)][head_i] = 0.
+                else:
+                    self.weights["encdec"]["layer_{}".format(layer_i)][head_i] += w
+
+
     def encode(self, features, state):
         src_seq = features["source"]
         src_mask = features["source_mask"]
