@@ -847,8 +847,21 @@ class SelectiveTransformer(modules.Module):
         return state
 
     def compute_head_selection_weight(self, var, name):
-        return torch.sigmoid(var)
-
+        if self.params.select_method == "soft":
+            if self.params.select_weight_function == "sigmoid":
+                return torch.sigmoid(var)
+            elif self.params.select_weight_function == "softmax":
+                return F.softmax(var, dim=0)
+        elif self.params.select_method == "hard":
+            if self.params.select_weight_function == "sigmoid":
+                weights = torch.sigmoid(var)
+            elif self.params.select_weight_function == "softmax":
+                weights = F.softmax(var, dim=0)
+            select_number = self.params.select_number if self.params.select_number > 0 else self.params.num_heads
+            index = weights.topk(select_number)[1]
+            selection = torch.zeros_like(weights)
+            selection[index] = 1.0
+            return selection
 
     @staticmethod
     def masking_bias(mask, inf=-1e9):
