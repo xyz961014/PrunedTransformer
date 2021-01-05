@@ -594,10 +594,10 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
             self.selected_o_transform = utils.selected_linear(self.o_transform, index,
                                                               dim=1)
         elif self.select_method == "soft":
-            self.selected_q_transform = self.q_transform
-            self.selected_k_transform = self.k_transform
-            self.selected_v_transform = self.v_transform
-            self.selected_o_transform = self.o_transform
+            self.selected_q_transform = lambda x: self.q_transform(x)
+            self.selected_k_transform = lambda x: self.k_transform(x)
+            self.selected_v_transform = lambda x: self.v_transform(x)
+            self.selected_o_transform = lambda x: self.o_transform(x)
         else:
             raise ValueError("Unsupported select method {}".format(self.select_method))
 
