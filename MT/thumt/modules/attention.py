@@ -564,7 +564,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
     def select_head(self, query):
         if self.input_aware_select:
             # compute on batch and token level mean of input
-            weights = self.additional_param["select_transform"](query.mean(dim=(0, 1)))
+            weights = self.additional_params["select_transform"](query.mean(dim=(0, 1)))
             self.weights = self.compute_weight(weights)
         else:
             self.weights = self.compute_weight(self.additional_params["kappa"])
