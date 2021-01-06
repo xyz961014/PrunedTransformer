@@ -572,15 +572,17 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
         if self.select_method == "hard":
 
             if self.select_number < self.num_heads:
-                self.weights, selected_heads = self.weights.topk(k=self.select_number,
-                                                                 sorted=False)
+                selected_weights, selected_heads = self.weights.topk(k=self.select_number,
+                                                                     sorted=False)
                 heads = set(h for h in range(self.num_heads))
                 selected_heads = set(selected_heads.tolist())
                 remove_heads = heads - selected_heads
                 remove_heads = list(remove_heads)
             else:
+                selected_weights = self.weights
                 remove_heads = []
-            self.weights = torch.ones_like(self.weights) - self.weights.detach() + self.weights
+            self.selected_weights = torch.ones_like(selected_weights) \
+                                    - selected_weights.detach() + selected_weights
 
             _, index = utils.find_pruneable_heads_and_indices(
                 remove_heads, 
@@ -594,6 +596,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
             self.selected_o_transform = utils.selected_linear(self.o_transform, index,
                                                               dim=1)
         elif self.select_method == "soft":
+            self.selected_weights = self.weights
             self.selected_q_transform = lambda x: self.q_transform(x)
             self.selected_k_transform = lambda x: self.k_transform(x)
             self.selected_v_transform = lambda x: self.v_transform(x)
@@ -644,7 +647,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
                             training=self.training)
 
         x = torch.matmul(weights, vh)
-        x = torch.einsum("n,bnld->bnld", self.weights, x)
+        x = torch.einsum("n,bnld->bnld", self.selected_weights, x)
 
         # combine heads
         output = self.selected_o_transform(self.combine_heads(x))
