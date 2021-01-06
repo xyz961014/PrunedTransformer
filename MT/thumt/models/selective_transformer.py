@@ -653,7 +653,7 @@ class SelectiveTransformer(modules.Module):
         for layer_i, layer in enumerate(self.encoder.layers):
             weights = layer.self_attention.attention.weights.tolist()
             for head_i, w in enumerate(weights):
-                summary.scalar("encoder layer_{} head_{}".format(layer_i, head_i), 
+                summary.scalar("encoder layer_{}/head_{}".format(layer_i, head_i), 
                                self.weights["encoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
                                step)
                 if step % accumulate_steps == 0:
@@ -665,7 +665,7 @@ class SelectiveTransformer(modules.Module):
             self_weights = layer.self_attention.attention.weights.tolist()
             encdec_weights = layer.encdec_attention.attention.weights.tolist()
             for head_i, w in enumerate(self_weights):
-                summary.scalar("decoder layer_{} head_{}".format(layer_i, head_i), 
+                summary.scalar("decoder layer_{}/head_{}".format(layer_i, head_i), 
                                self.weights["decoder"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
                                step)
                 if step % accumulate_steps == 0:
@@ -673,7 +673,7 @@ class SelectiveTransformer(modules.Module):
                 else:
                     self.weights["decoder"]["layer_{}".format(layer_i)][head_i] += w
             for head_i, w in enumerate(encdec_weights):
-                summary.scalar("encdec layer_{} head_{}".format(layer_i, head_i), 
+                summary.scalar("encdec layer_{}/head_{}".format(layer_i, head_i), 
                                self.weights["encdec"]["layer_{}".format(layer_i)][head_i] / accumulate_steps,
                                step)
                 if step % accumulate_steps == 0:
