@@ -847,7 +847,7 @@ class WeightedTransformer(modules.Module):
             return torch.sigmoid(var)
         elif re.search("kappa", name):
             if self.params.expand_kappa_norm:
-                return F.softmax(var, dim=0) * params.num_heads
+                return F.softmax(var, dim=0) * self.params.num_heads
             else:
                 return F.softmax(var, dim=0)
         else:
