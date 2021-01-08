@@ -10,3 +10,4 @@ from thumt.modules.layer_norm import LayerNorm
 from thumt.modules.losses import SmoothedCrossEntropyLoss
 from thumt.modules.module import Module
 from thumt.modules.recurrent import LSTMCell, GRUCell
+from thumt.modules.concrete_gate import ConcreteGate

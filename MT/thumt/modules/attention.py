@@ -12,6 +12,7 @@ import thumt.utils as utils
 
 from thumt.modules.module import Module
 from thumt.modules.affine import Affine
+from thumt.modules.concrete_gate import ConcreteGate
 
 
 class Attention(Module):
@@ -340,7 +341,7 @@ class MultiHeadAdditiveAttention(MultiHeadAttentionBase):
 
 class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, expand_kappa_norm=False, sigmoid_weight=False, 
+    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, expand_kappa_norm=False, sigmoid_weight=False, sigmoid_reg_loss='', l0_penalty=1.0,
                  name="weighted_multihead_attention"):
         super().__init__(name=name)
 
@@ -350,6 +351,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
         self.enable_kappa = enable_kappa
         self.sigmoid_weight = sigmoid_weight
         self.expand_kappa_norm = expand_kappa_norm
+        self.sigmoid_reg_loss = sigmoid_reg_loss
         self.additional_params = []
 
         head_size = hidden_size // num_heads
@@ -365,9 +367,13 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             self.o_transform = Affine(hidden_size, hidden_size,
                                       name="o_transform")
             if enable_kappa:
-                self.kappa = nn.Parameter(torch.empty(num_heads))
-                self.add_name(self.kappa, "kappa")
-                self.additional_params.append(self.kappa)
+                if sigmoid_reg_loss.lower() == "l0":
+                    self.kappa = ConcreteGate(shape=[1, num_heads, 1, 1],
+                                              l0_penalty=l0_penalty)
+                else:
+                    self.kappa = nn.Parameter(torch.empty(num_heads))
+                    self.add_name(self.kappa, "kappa")
+                    self.additional_params.append(self.kappa)
 
 
         self.reset_parameters()
@@ -415,18 +421,20 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
         x = torch.matmul(weights, vh)
 
         if self.enable_kappa:
-            # combine kappa weights and combine heads
-            if self.sigmoid_weight:
-                normalized_kappa = torch.sigmoid(self.kappa)
+            if self.sigmoid_reg_loss.lower() == "l0":
+                x = self.kappa(x)
             else:
-                normalized_kappa = F.softmax(self.kappa, dim=0)
-                if self.expand_kappa_norm:
-                    normalized_kappa = normalized_kappa * self.num_heads
-            x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
-            output = self.o_transform(self.combine_heads(x))
-        else:
-            # combine heads
-            output = self.o_transform(self.combine_heads(x))
+                # combine kappa weights and combine heads
+                if self.sigmoid_weight:
+                    normalized_kappa = torch.sigmoid(self.kappa)
+                else:
+                    normalized_kappa = F.softmax(self.kappa, dim=0)
+                    if self.expand_kappa_norm:
+                        normalized_kappa = normalized_kappa * self.num_heads
+                x = torch.einsum("n,bnld->bnld", normalized_kappa, x)
+
+        # combine heads
+        output = self.o_transform(self.combine_heads(x))
 
         if kv is not None:
             return output, k, v
@@ -514,7 +522,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             nn.init.constant_(self.k_transform.bias, 0.0)
             nn.init.constant_(self.v_transform.bias, 0.0)
             nn.init.constant_(self.o_transform.bias, 0.0)
-            if self.enable_kappa:
+            if self.enable_kappa and not self.sigmoid_reg_loss.lower() == "l0":
                 nn.init.constant_(self.kappa, 0.0)
         else:
             raise ValueError("Unknown initializer %d" % initializer)

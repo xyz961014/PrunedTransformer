@@ -111,12 +111,15 @@ class WeightedAttentionSubLayer(modules.Module):
         self.pruned_heads = set()
 
         with utils.scope(name):
-            self.attention = modules.WeightedMultiHeadAttention(params.hidden_size, 
-                                                                params.num_heads, 
-                                                                params.attention_dropout,
-                                                                enable_kappa=enable_kappa,
-                                                                expand_kappa_norm=params.expand_kappa_norm,
-                                                                sigmoid_weight=params.sigmoid_weight)
+            self.attention = modules.WeightedMultiHeadAttention(
+                    params.hidden_size, 
+                    params.num_heads, 
+                    params.attention_dropout,
+                    enable_kappa=enable_kappa,
+                    expand_kappa_norm=params.expand_kappa_norm,
+                    sigmoid_weight=params.sigmoid_weight,
+                    sigmoid_reg_loss=params.sigmoid_reg_loss,
+                    l0_penalty=params.reg_loss_alpha)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
@@ -790,11 +793,33 @@ class WeightedTransformer(modules.Module):
         loss = self.criterion(logits, labels)
         mask = mask.to(torch.float32)
 
+        # Prevent FP16 overflow
+        if loss.dtype == torch.float16:
+            loss = loss.to(torch.float32)
+
+        if mode == "eval":
+            if level == "sentence":
+                loss = -torch.sum(loss * mask, 1)
+            else:
+                loss = torch.exp(-loss) * mask - (1 - mask)
+        else:
+            loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+
+
         if self.sigmoid_reg_loss:
-            reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
-            weight_param = torch.cat(self.additional_params, dim=0)
-            label = torch.ones_like(weight_param).to(weight_param) * 0.5
-            loss = loss - reg_loss(torch.sigmoid(weight_param), label) * self.params.reg_loss_alpha
+            if self.sigmoid_reg_loss.lower() == "l0":
+                l0_loss = 0.
+                for layer in self.encoder.layers:
+                    l0_loss += layer.self_attention.attention.kappa.get_penalty()
+                for layer in self.decoder.layers:
+                    l0_loss += layer.self_attention.attention.kappa.get_penalty()
+                    l0_loss += layer.encdec_attention.attention.kappa.get_penalty()
+                loss = loss + l0_loss
+            else:
+                reg_loss = utils.get_reg_loss(self.sigmoid_reg_loss)
+                weight_param = torch.cat(self.additional_params, dim=0)
+                label = torch.ones_like(weight_param).to(weight_param) * 0.5
+                loss = loss - reg_loss(torch.sigmoid(weight_param), label) * self.params.reg_loss_alpha
 
         if self.sigmoid_weight:
             sigmoid_reg_loss = self.sigmoid_reg_loss if self.sigmoid_reg_loss else "l1"
@@ -815,18 +840,7 @@ class WeightedTransformer(modules.Module):
                 weight_sum = torch.sigmoid(weight_param).sum()
                 loss = loss + sum_loss(weight_sum, torch.ones_like(weight_sum) * self.encdec_kappa_sum_loss) * self.params.reg_loss_alpha
 
-
-        # Prevent FP16 overflow
-        if loss.dtype == torch.float16:
-            loss = loss.to(torch.float32)
-
-        if mode == "eval":
-            if level == "sentence":
-                return -torch.sum(loss * mask, 1)
-            else:
-                return  torch.exp(-loss) * mask - (1 - mask)
-
-        return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+        return loss
 
     def empty_state(self, batch_size, device):
         state = {
@@ -844,7 +858,10 @@ class WeightedTransformer(modules.Module):
 
     def compute_head_selection_weight(self, var, name):
         if self.params.sigmoid_weight:
-            return torch.sigmoid(var)
+            if self.params.sigmoid_reg_loss.lower() == "l0":
+                return var.get_gates().squeeze()
+            else:
+                return torch.sigmoid(var)
         elif re.search("kappa", name):
             if self.params.expand_kappa_norm:
                 return F.softmax(var, dim=0) * self.params.num_heads
@@ -892,8 +909,8 @@ class WeightedTransformer(modules.Module):
             encdec_kappa_sum_loss=0,
             expand_kappa_norm=True,
             sigmoid_weight=True,
-            sigmoid_reg_loss="l1",
-            reg_loss_alpha=0.1,
+            sigmoid_reg_loss="",
+            reg_loss_alpha=1.0, # serve as l0_penalty as well
             env_name="train",
             # Override default parameters
             warmup_steps=4000,
