@@ -370,6 +370,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
                 if sigmoid_reg_loss.lower() == "l0":
                     self.kappa = ConcreteGate(shape=[1, num_heads, 1, 1],
                                               l0_penalty=l0_penalty)
+                    self.additional_params += list(self.kappa.parameters())
                 else:
                     self.kappa = nn.Parameter(torch.empty(num_heads))
                     self.add_name(self.kappa, "kappa")
