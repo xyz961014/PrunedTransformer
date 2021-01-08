@@ -859,7 +859,7 @@ class WeightedTransformer(modules.Module):
     def compute_head_selection_weight(self, var, name):
         if self.params.sigmoid_weight:
             if self.params.sigmoid_reg_loss.lower() == "l0":
-                return var.get_gates().squeeze()
+                return var.get_gates(is_training=False).squeeze()
             else:
                 return torch.sigmoid(var)
         elif re.search("kappa", name):
