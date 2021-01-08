@@ -635,10 +635,11 @@ def main(args):
 
             summary.scalar("loss", loss, step, write_every_n_steps=1)
             summary.scalar("global_step/sec", t, step)
-            if hasattr(model, "summary_weights"):
-                model.summary_weights(summary, step)
 
             if counter % params.update_cycle == 0:
+                if hasattr(model, "summary_weights"):
+                    model.summary_weights(summary, step)
+
                 if step > 0 and step % args.log_interval == 0:
                     elapsed = time.time() - start_time
                     if True in trainable_flags and step < params.train_steps:
