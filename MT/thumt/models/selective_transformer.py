@@ -118,6 +118,7 @@ class SelectiveAttentionSubLayer(modules.Module):
                     params.num_heads, 
                     params.attention_dropout,
                     input_aware_select=params.input_aware_select,
+                    sampling_train=params.sampling_train,
                     select_weight_function=params.select_weight_function,
                     select_method=params.select_method,
                     select_number=params.select_number
@@ -941,6 +942,7 @@ class SelectiveTransformer(modules.Module):
             shared_layer_params=False,
             # select settings
             input_aware_select=False,
+            sampling_train=True,
             select_weight_function="sigmoid",
             select_method="hard",
             select_number=0,

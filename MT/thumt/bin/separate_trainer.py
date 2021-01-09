@@ -567,7 +567,15 @@ def main(args):
     if args.checkpoint is not None:
         # Load pre-trained models
         state = torch.load(args.checkpoint, map_location="cpu")
-        model.load_state_dict(state["model"])
+        missing_keys, unexpected_keys = model.load_state_dict(state["model"], strict=False)
+        if len(missing_keys) > 0:
+            print("Missing Key(s) in state_dict: ", end="")
+            for key in missing_keys:
+                print(key)
+        if len(unexpected_keys) > 0:
+            print("Unexpected Key(s) in state_dict: ", end="")
+            for key in unexpected_keys:
+                print(key)
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)

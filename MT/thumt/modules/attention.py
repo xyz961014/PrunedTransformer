@@ -532,7 +532,7 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
 
     def __init__(self, hidden_size, head_size, num_heads, dropout=0.0, 
-                 input_aware_select=False,
+                 input_aware_select=False, sampling_train=True,
                  select_weight_function="sigmoid",
                  select_method="soft",
                  select_number=0,
@@ -545,6 +545,7 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
         self.dropout = dropout
         
         self.input_aware_select = input_aware_select
+        self.sampling_train = sampling_train
         self.select_method = select_method
         self.select_number = select_number if select_number > 0 else num_heads
 
@@ -581,8 +582,14 @@ class SelectiveMultiHeadAttention(MultiHeadAttentionBase):
         if self.select_method == "hard":
 
             if self.select_number < self.num_heads:
-                selected_weights, selected_heads = self.weights.topk(k=self.select_number,
-                                                                     sorted=False)
+                if self.sampling_train and self.training:
+                    # sample on probablity when training
+                    selected_heads = torch.multinomial(self.weights, self.select_number)
+                    selected_weights = self.weights.index_select(0, selected_heads)
+                else:
+                    # top-k on inference
+                    selected_weights, selected_heads = self.weights.topk(k=self.select_number,
+                                                                         sorted=False)
                 heads = set(h for h in range(self.num_heads))
                 selected_heads = set(selected_heads.tolist())
                 remove_heads = heads - selected_heads

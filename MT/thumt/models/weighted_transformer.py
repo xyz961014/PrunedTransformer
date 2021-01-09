@@ -859,7 +859,14 @@ class WeightedTransformer(modules.Module):
     def compute_head_selection_weight(self, var, name):
         if self.params.sigmoid_weight:
             if self.params.sigmoid_reg_loss.lower() == "l0":
-                return var.get_gates(is_training=False).squeeze()
+                if type(var) == torch.Tensor:
+                    low, high = self.encoder.layers[0].self_attention.attention.kappa.stretch_limits
+                    concrete = torch.sigmoid(var)
+                    stretched_concrete = concrete * (high - low) + low
+                    clipped_concrete = stretched_concrete.clamp(0, 1)
+                    return clipped_concrete.squeeze()
+                else:
+                    return var.get_gates(is_training=False).squeeze()
             else:
                 return torch.sigmoid(var)
         elif re.search("kappa", name):
