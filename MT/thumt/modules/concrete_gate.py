@@ -88,8 +88,8 @@ class ConcreteGate(Module):
         Returns the regularizer value that should to be MINIMIZED (negative logprior)
         """
 
-        if self.l0_penalty == 0:
-            print("get_penalty() is called with penaltiy set to 0")
+        #if self.l0_penalty == 0:
+        #    print("get_penalty() is called with penaltiy set to 0")
 
         low, high = self.stretch_limits
         assert low < 0.0, "p_gate_closed can be computed only if lower strech limit is negative"
