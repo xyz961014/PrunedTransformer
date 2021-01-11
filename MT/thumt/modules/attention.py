@@ -341,7 +341,7 @@ class MultiHeadAdditiveAttention(MultiHeadAttentionBase):
 
 class WeightedMultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, expand_kappa_norm=False, sigmoid_weight=False, sigmoid_reg_loss='', l0_penalty=1.0,
+    def __init__(self, hidden_size, num_heads, dropout=0.0, enable_kappa=True, expand_kappa_norm=False, sigmoid_weight=False, sigmoid_reg_loss='', l0_penalty=0.01, l0_temperature=0.33,
                  name="weighted_multihead_attention"):
         super().__init__(name=name)
 
@@ -369,7 +369,8 @@ class WeightedMultiHeadAttention(MultiHeadAttentionBase):
             if enable_kappa:
                 if sigmoid_reg_loss.lower() == "l0":
                     self.kappa = ConcreteGate(shape=[1, num_heads, 1, 1],
-                                              l0_penalty=l0_penalty)
+                                              l0_penalty=l0_penalty,
+                                              temperature=l0_temperature)
                     self.additional_params += list(self.kappa.parameters())
                 else:
                     self.kappa = nn.Parameter(torch.empty(num_heads))

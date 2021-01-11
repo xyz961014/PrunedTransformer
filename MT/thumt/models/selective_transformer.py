@@ -234,7 +234,10 @@ class SelectiveTransformerEncoderLayer(modules.Module):
         with utils.scope(name):
             if shared_layer is not None and params.shared_layer_params:
                 self.self_attention = shared_layer.self_attention
-                self.feed_forward = shared_layer.feed_forward
+                if params.shared_ffn_params:
+                    self.feed_forward = shared_layer.feed_forward
+                else:
+                    self.feed_forward = FFNSubLayer(params)
             else:
                 self.self_attention = SelectiveAttentionSubLayer(params) 
                 self.feed_forward = FFNSubLayer(params)
@@ -295,7 +298,10 @@ class SelectiveTransformerDecoderLayer(modules.Module):
             if shared_layer is not None and params.shared_layer_params:
                 self.self_attention = shared_layer.self_attention
                 self.encdec_attention = shared_layer.encdec_attention
-                self.feed_forward = shared_layer.feed_forward
+                if params.shared_ffn_params:
+                    self.feed_forward = shared_layer.feed_forward
+                else:
+                    self.feed_forward = FFNSubLayer(params)
             else:
                 self.self_attention = SelectiveAttentionSubLayer(params,
                                                                  name="self_attention")
@@ -940,6 +946,7 @@ class SelectiveTransformer(modules.Module):
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
             shared_layer_params=False,
+            shared_ffn_params=False,
             # select settings
             input_aware_select=False,
             sampling_train=True,

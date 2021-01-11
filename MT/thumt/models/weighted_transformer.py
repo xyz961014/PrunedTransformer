@@ -119,7 +119,8 @@ class WeightedAttentionSubLayer(modules.Module):
                     expand_kappa_norm=params.expand_kappa_norm,
                     sigmoid_weight=params.sigmoid_weight,
                     sigmoid_reg_loss=params.sigmoid_reg_loss,
-                    l0_penalty=params.reg_loss_alpha)
+                    l0_penalty=params.reg_loss_alpha,
+                    l0_temperature=params.l0_temperature)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
         self.additional_params = self.attention.additional_params
@@ -918,6 +919,7 @@ class WeightedTransformer(modules.Module):
             sigmoid_weight=True,
             sigmoid_reg_loss="",
             reg_loss_alpha=1.0, # serve as l0_penalty as well
+            l0_temperature=0.33,
             env_name="train",
             # Override default parameters
             warmup_steps=4000,
