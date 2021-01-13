@@ -52,6 +52,8 @@ def parse_args():
                         help="prune heads before load state dict, used in translate finetuned pruned model")
     parser.add_argument("--weight_npy", type=str, default="",
                         help="npy file containing head weights")
+    parser.add_argument("--dim_prune_prob", type=float, default=0.0,
+                        help="prune dims in FitTransformer")
 
     # mutually exclusive parameters
     group = parser.add_mutually_exclusive_group()
@@ -221,6 +223,9 @@ def main(args):
                 with open(args.prune_json) as fp_json:
                     heads_to_prune = json.load(fp_json)
                 model.prune_heads(heads_to_prune)
+
+        if args.dim_prune_prob:
+            model.prune_dim(p=args.dim_prune_prob)
 
         if len(args.input) == 1:
             mode = "infer"

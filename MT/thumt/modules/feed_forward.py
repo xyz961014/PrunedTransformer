@@ -91,3 +91,40 @@ class WeightedFeedForward(Module):
         nn.init.xavier_uniform_(self.output_transform.weight)
         nn.init.constant_(self.input_transform.bias, 0.0)
         nn.init.constant_(self.output_transform.bias, 0.0)
+
+class FitFeedForward(Module):
+
+    def __init__(self, input_size, hidden_size, output_size=None, dropout=0.0,
+                 name="feed_forward"):
+        super(FitFeedForward, self).__init__(name=name)
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size or input_size
+        self.dropout = dropout
+
+        with utils.scope(name):
+            self.input_transform = Affine(input_size, hidden_size,
+                                          name="input_transform")
+            self.output_transform = Affine(hidden_size, self.output_size,
+                                           name="output_transform")
+
+        self.reset_parameters()
+
+    def prune_dim(self, index):
+        self.input_transform = utils.prune_linear_layer(self.input_transform, index, dim=1)
+        self.output_transform = utils.prune_linear_layer(self.output_transform, index, dim=0)
+        self.hidden_size = index.size(0)
+
+    def forward(self, x):
+        h = F.relu(self.input_transform(x))
+        h = F.dropout(h, self.dropout, self.training)
+        return self.output_transform(h)
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.input_transform.weight)
+        nn.init.xavier_uniform_(self.output_transform.weight)
+        nn.init.constant_(self.input_transform.bias, 0.0)
+        nn.init.constant_(self.output_transform.bias, 0.0)
+
+

@@ -17,3 +17,17 @@ def get_reg_loss(name):
                     }
     return REG_LOSS_DICT[name]
  
+def dim_dropout(x, p=0.5, training=True, dim=0):
+    """
+    dropout on specified dimension
+    """
+    if not training or not p:
+        return x
+    if dim < 0:
+        dim = x.dim() + dim
+    x = x.clone()
+    mask_shape = [x.size(i) if i == dim else 1 for i in range(x.dim())]
+    mask = x.new_empty(mask_shape, requires_grad=False).bernoulli_(1 - p)
+    mask = mask.div_(1 - p)
+    mask = mask.expand_as(x)
+    return x * mask

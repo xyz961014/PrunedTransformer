@@ -65,6 +65,8 @@ def parse_args(args=None):
                         help="json file containing heads to prune")
     parser.add_argument("--weight_npy", type=str, default="",
                         help="npy file containing head weights")
+    parser.add_argument("--dim_prune_prob", type=float, default=0.0,
+                        help="prune dims in FitTransformer")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -579,6 +581,8 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
+        if args.dim_prune_prob:
+            model.prune_dim(p=args.dim_prune_prob)
         step = params.initial_step
         additional_step = params.additional_initial_step
         epoch = 0
@@ -592,6 +596,8 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
+        if args.dim_prune_prob:
+            model.prune_dim(p=args.dim_prune_prob)
 
         if "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])
@@ -602,6 +608,8 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
+        if args.dim_prune_prob:
+            model.prune_dim(p=args.dim_prune_prob)
         broadcast(model)
 
     def train_fn(inputs):

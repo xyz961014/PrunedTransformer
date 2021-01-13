@@ -802,6 +802,19 @@ class SelectiveTransformer(modules.Module):
 
         return encoder_confidence, decoder_confidence, encdec_confidence
 
+
+    def selected_log_prob_sum(self):
+        log_prob_sum = 0.
+
+        for layer in self.encoder.layers:
+            log_prob_sum += layer.self_attention.attention.selected_weights.log().sum()
+        for layer in self.decoder.layers:
+            log_prob_sum += layer.self_attention.attention.selected_weights.log().sum()
+            log_prob_sum += layer.encdec_attention.attention.selected_weights.log().sum()
+
+        return log_prob_sum
+
+
     def compute_grad_sensitivity(self, features, labels):
         mask = features["target_mask"]
 
@@ -877,11 +890,17 @@ class SelectiveTransformer(modules.Module):
 
         if mode == "eval":
             if level == "sentence":
-                return -torch.sum(loss * mask, 1)
+                loss = -torch.sum(loss * mask, 1)
             else:
-                return  torch.exp(-loss) * mask - (1 - mask)
+                loss = torch.exp(-loss) * mask - (1 - mask)
+        else:
+            loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
-        return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+        if self.params.select_method == "hard":
+            prob_loss = self.selected_log_prob_sum() * loss.clone().detach()
+            loss = loss + prob_loss - prob_loss.detach() 
+
+        return loss
 
     def empty_state(self, batch_size, device):
         state = {
