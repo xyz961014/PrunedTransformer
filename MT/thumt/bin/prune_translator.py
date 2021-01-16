@@ -166,6 +166,15 @@ def infer_gpu_num(param_str):
         dev_str = result.groups()[-1]
         return len(dev_str.split(","))
 
+def print_variables(model):
+    total_size = 0
+    for name, v in sorted(list(model.named_parameters())):
+        print("%s %s" % (name.ljust(60), str(list(v.shape)).rjust(15)))
+        total_size += v.numel()
+    print("Total trainable model variables size: %d" % total_size)
+
+
+
 
 def main(args):
     # Load configs
@@ -226,6 +235,8 @@ def main(args):
 
         if args.dim_prune_prob:
             model.prune_dim(p=args.dim_prune_prob)
+            print("Model params after dim prune")
+            print_variables(model)
 
         if len(args.input) == 1:
             mode = "infer"
