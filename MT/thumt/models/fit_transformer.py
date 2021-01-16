@@ -336,6 +336,7 @@ class FitTransformer(modules.Module):
             index_len = round((1 - p) * self.params.hidden_size)
             if index_len:
                 index = torch.ones(self.params.hidden_size).multinomial(index_len)
+                index = index.sort()[0]
         else:
             index_len = index.size(0)
 

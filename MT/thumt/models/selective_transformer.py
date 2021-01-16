@@ -896,7 +896,7 @@ class SelectiveTransformer(modules.Module):
         else:
             loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
-        if self.params.select_method == "hard":
+        if self.params.select_method == "hard" and self.params.sampling_train:
             prob_loss = self.selected_log_prob_sum() * loss.clone().detach()
             loss = loss + prob_loss - prob_loss.detach() 
 
