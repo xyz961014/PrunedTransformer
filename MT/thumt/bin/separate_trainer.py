@@ -583,6 +583,8 @@ def main(args):
         prune_model(model, args.prune_json)
         if args.dim_prune_prob:
             model.prune_dim(p=args.dim_prune_prob)
+            print("Model params after dim prune")
+            print_variables(model, params.pattern, dist.get_rank() == 0)
         step = params.initial_step
         additional_step = params.additional_initial_step
         epoch = 0
@@ -598,6 +600,8 @@ def main(args):
         prune_model(model, args.prune_json)
         if args.dim_prune_prob:
             model.prune_dim(p=args.dim_prune_prob)
+            print("Model params after dim prune")
+            print_variables(model, params.pattern, dist.get_rank() == 0)
 
         if "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])
@@ -610,6 +614,8 @@ def main(args):
         prune_model(model, args.prune_json)
         if args.dim_prune_prob:
             model.prune_dim(p=args.dim_prune_prob)
+            print("Model params after dim prune")
+            print_variables(model, params.pattern, dist.get_rank() == 0)
         broadcast(model)
 
     def train_fn(inputs):
