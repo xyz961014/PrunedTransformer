@@ -53,7 +53,9 @@ def parse_args():
     parser.add_argument("--weight_npy", type=str, default="",
                         help="npy file containing head weights")
     parser.add_argument("--dim_prune_prob", type=float, default=0.0,
-                        help="prune dims in FitTransformer")
+                        help="sample prune dims in FitTransformer")
+    parser.add_argument("--dim_prune", type=int, default=0,
+                        help="prune dim in FitTransformer, set to disable sampling")
 
     # mutually exclusive parameters
     group = parser.add_mutually_exclusive_group()
@@ -219,6 +221,20 @@ def main(args):
                     heads_to_prune = json.load(fp_json)
                 model.prune_heads(heads_to_prune)
 
+            if args.dim_prune:
+                index_len = model.hidden_size - args.dim_prune
+                if index_len:
+                    index = torch.ones(model.hidden_size).multinomial(index_len)
+                    index = index.sort()[0]
+                model.prune_dim(index=index)
+                print("Model params after dim prune")
+                print_variables(model)
+            elif args.dim_prune_prob:
+                model.prune_dim(p=args.dim_prune_prob)
+                print("Model params after dim prune")
+                print_variables(model)
+
+
         model.eval()
         model.load_state_dict(
             torch.load(utils.latest_checkpoint(args.checkpoint),
@@ -233,10 +249,18 @@ def main(args):
                     heads_to_prune = json.load(fp_json)
                 model.prune_heads(heads_to_prune)
 
-        if args.dim_prune_prob:
-            model.prune_dim(p=args.dim_prune_prob)
-            print("Model params after dim prune")
-            print_variables(model)
+            if args.dim_prune:
+                index_len = model.hidden_size - args.dim_prune
+                if index_len:
+                    index = torch.ones(model.hidden_size).multinomial(index_len)
+                    index = index.sort()[0]
+                model.prune_dim(index=index)
+                print("Model params after dim prune")
+                print_variables(model)
+            elif args.dim_prune_prob:
+                model.prune_dim(p=args.dim_prune_prob)
+                print("Model params after dim prune")
+                print_variables(model)
 
         if len(args.input) == 1:
             mode = "infer"
