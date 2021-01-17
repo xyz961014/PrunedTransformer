@@ -258,6 +258,21 @@ class AdamOptimizer(Optimizer):
 
         return state
 
+    def prune_dim(self, index, model_params):
+        model_params = dict(model_params)
+        for name, var in self._slots.items():
+            param = model_params[name]
+            shape = param.shape
+            if not var["m"].shape == shape:
+                dim = 0
+                for i in range(param.dim()):
+                    if not param.size(i) == var["m"].size(i):
+                        dim = i
+                        break
+                self._slots[name]["m"] = var["m"].index_select(dim, index)
+                self._slots[name]["v"] = var["v"].index_select(dim, index)
+
+
     def load_state_dict(self, state):
         self._iterations = state.get("iterations", self._iterations)
 
@@ -487,6 +502,9 @@ class MultiStepOptimizer(Optimizer):
 
             self.scale_gradients(grads, 1.0 / (self._n * size))
             self._optimizer.apply_gradients(zip(grads, var_list))
+
+    def prune_dim(self, index, model_params):
+        self._optimizer.prune_dim(index, model_params)
 
     def state_dict(self):
         state = {

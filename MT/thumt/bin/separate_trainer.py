@@ -67,6 +67,9 @@ def parse_args(args=None):
                         help="npy file containing head weights")
     parser.add_argument("--dim_prune_prob", type=float, default=0.0,
                         help="prune dims in FitTransformer")
+    parser.add_argument("--dim_prune_interval", type=int, default=0,
+                        help="prune dims every N steps in FitTransformer"
+                             " set to 0 to disable it")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -581,7 +584,7 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob:
+        if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
             print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -598,7 +601,7 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob:
+        if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
             print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -612,7 +615,7 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob:
+        if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
             print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -661,6 +664,17 @@ def main(args):
             if counter % params.update_cycle == 0:
                 if hasattr(model, "summary_weights"):
                     model.summary_weights(summary, step)
+
+                if args.dim_prune_interval and step > 0 and step % args.dim_prune_interval == 0:
+                    index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
+                    if index_len:
+                        index = torch.ones(model.hidden_size).multinomial(index_len)
+                        index = index.sort()[0]
+                    model.prune_dim(index=index)
+                    optimizer.prune_dim(index, model.named_parameters())
+                    additional_optimizer.prune_dim(index, model.named_parameters())
+                    print("Model params after dim prune")
+                    print_variables(model, params.pattern, dist.get_rank() == 0)
 
                 if step > 0 and step % args.log_interval == 0:
                     elapsed = time.time() - start_time
