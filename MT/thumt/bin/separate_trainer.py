@@ -665,17 +665,6 @@ def main(args):
                 if hasattr(model, "summary_weights"):
                     model.summary_weights(summary, step)
 
-                if args.dim_prune_interval and step > 0 and step % args.dim_prune_interval == 0:
-                    index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
-                    if index_len:
-                        index = torch.ones(model.hidden_size).multinomial(index_len)
-                        index = index.sort()[0]
-                    model.prune_dim(index=index)
-                    optimizer.prune_dim(index, model.named_parameters())
-                    additional_optimizer.prune_dim(index, model.named_parameters())
-                    print("Model params after dim prune")
-                    print_variables(model, params.pattern, dist.get_rank() == 0)
-
                 if step > 0 and step % args.log_interval == 0:
                     elapsed = time.time() - start_time
                     if True in trainable_flags and step < params.train_steps:
@@ -703,6 +692,18 @@ def main(args):
                         summary.close()
 
                     return
+
+                if args.dim_prune_interval and step > 0 and step % args.dim_prune_interval == 0:
+                    index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
+                    if index_len:
+                        index = torch.ones(model.hidden_size).multinomial(index_len)
+                        index = index.sort()[0]
+                    model.prune_dim(index=index)
+                    optimizer.prune_dim(index, model.named_parameters())
+                    additional_optimizer.prune_dim(index, model.named_parameters())
+                    print("Model params after dim prune")
+                    print_variables(model, params.pattern, dist.get_rank() == 0)
+
 
                 if step % params.eval_steps == 0:
                     utils.evaluate(model, sorted_key, eval_dataset,
