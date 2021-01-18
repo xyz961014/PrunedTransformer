@@ -77,8 +77,6 @@ class FitLayerNorm(Module):
         self.normalized_shape = new_shape
         if self.weight is not None:
             W = self.weight.index_select(0, index).clone().detach()
-            scale = self.weight.size(0) / index.size(0)
-            W.mul_(scale)
             with utils.scope(self.name):
                 self.weight = nn.Parameter(torch.Tensor(*new_shape))
                 self.add_name(self.weight, "weight")
@@ -87,8 +85,6 @@ class FitLayerNorm(Module):
             self.weight.requires_grad = True
         if self.bias is not None:
             b = self.bias.index_select(0, index).clone().detach()
-            scale = self.bias.size(0) / index.size(0)
-            b.mul_(scale)
             with utils.scope(self.name):
                 self.bias = nn.Parameter(torch.Tensor(*new_shape))
                 self.add_name(self.bias, "bias")
