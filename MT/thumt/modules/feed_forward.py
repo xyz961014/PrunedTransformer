@@ -112,8 +112,8 @@ class FitFeedForward(Module):
         self.reset_parameters()
 
     def prune_dim(self, index):
-        self.input_transform = utils.prune_linear_layer(self.input_transform, index, dim=1)
-        self.output_transform = utils.prune_linear_layer(self.output_transform, index, dim=0)
+        self.input_transform = utils.prune_linear_layer(self.input_transform, index, dim=1, scale=True)
+        self.output_transform = utils.prune_linear_layer(self.output_transform, index, dim=0, scale=True)
         self.hidden_size = index.size(0)
 
     def forward(self, x):

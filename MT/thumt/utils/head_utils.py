@@ -35,7 +35,7 @@ def visualize_head_selection(model, pattern, func=None, env=None, step=None):
             vis.bar(func(var.data, name), win=name, opts={"title": name})
 
 
-def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0):
+def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0, scale: bool = False):
     """
     Prune a linear layer to keep only entries in index.
 
@@ -52,11 +52,17 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0):
     from thumt.modules import Affine, WeightedAffine
     index = index.to(layer.weight.device)
     W = layer.weight.index_select(dim, index).clone().detach()
+    if scale:
+        scale = layer.weight.size(dim) / index.size(0)
+        W.mul_(scale)
     if layer.bias is not None:
         if dim == 1:
             b = layer.bias.clone().detach()
         else:
             b = layer.bias.index_select(dim, index).clone().detach()
+            if scale:
+                scale = layer.bias.size(dim) / index.size(0)
+                b.mul_(scale)
     new_size = list(layer.weight.size())
     new_size[dim] = len(index)
     if type(layer) == Affine:

@@ -773,10 +773,10 @@ class FitMultiHeadAttention(MultiHeadAttentionBase):
         self.reset_parameters()
 
     def prune_dim(self, index):
-        self.q_transform = utils.prune_linear_layer(self.q_transform, index, dim=1)
-        self.k_transform = utils.prune_linear_layer(self.k_transform, index, dim=1)
-        self.v_transform = utils.prune_linear_layer(self.v_transform, index, dim=1)
-        self.o_transform = utils.prune_linear_layer(self.o_transform, index, dim=0)
+        self.q_transform = utils.prune_linear_layer(self.q_transform, index, dim=1, scale=True)
+        self.k_transform = utils.prune_linear_layer(self.k_transform, index, dim=1, scale=True)
+        self.v_transform = utils.prune_linear_layer(self.v_transform, index, dim=1, scale=True)
+        self.o_transform = utils.prune_linear_layer(self.o_transform, index, dim=0, scale=True)
         self.hidden_size = index.size(0)
 
     def forward(self, query, bias, memory=None, kv=None):

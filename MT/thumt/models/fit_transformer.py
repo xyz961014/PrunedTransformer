@@ -283,6 +283,8 @@ class FitTransformer(modules.Module):
 
         if not self.params.shared_embedding_and_softmax_weights:
             w = self.softmax_weights.index_select(1, index).clone().detach()
+            scale = self.softmax_weights.size(1) / index_len
+            w.mul_(scale)
             with utils.scope(self.name):
                 self.softmax_weights = torch.nn.Parameter(
                     torch.empty([tvoc_size, index_len]))
@@ -294,6 +296,9 @@ class FitTransformer(modules.Module):
         if not self.params.shared_source_target_embedding:
             src_e = self.source_embedding.index_select(1, index).clone().detach()
             trg_e = self.target_embedding.index_select(1, index).clone().detach()
+            scale = self.source_embedding.size(1) / index_len
+            src_e.mul_(scale)
+            trg_e.mul_(scale)
             with utils.scope(self.name):
                 self.source_embedding = torch.nn.Parameter(
                     torch.empty([svoc_size, index_len]))
@@ -309,6 +314,8 @@ class FitTransformer(modules.Module):
             self.target_embedding.requires_grad = True
         else:
             e = self.weights.index_select(1, index).clone().detach()
+            scale = self.weights.size(1) / index_len
+            e.mul_(scale)
             with utils.scope(self.name):
                 self.weights = torch.nn.Parameter(
                     torch.empty([svoc_size, index_len]))
@@ -318,6 +325,8 @@ class FitTransformer(modules.Module):
             self.weights.requires_grad = True
 
         b = self.bias.index_select(0, index).clone().detach()
+        scale = self.bias.size(0) / index_len
+        b.mul_(scale)
         with utils.scope(self.name):
             self.bias = torch.nn.Parameter(torch.zeros([index_len]))
             self.add_name(self.bias, "bias")
