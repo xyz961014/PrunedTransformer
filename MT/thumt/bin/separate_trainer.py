@@ -574,19 +574,22 @@ def main(args):
         state = torch.load(args.checkpoint, map_location="cpu")
         missing_keys, unexpected_keys = model.load_state_dict(state["model"], strict=False)
         if len(missing_keys) > 0:
-            print("Missing Key(s) in state_dict: ", end="")
-            for key in missing_keys:
-                print(key)
+            if dist.get_rank() == 0:
+                print("Missing Key(s) in state_dict: ", end="")
+                for key in missing_keys:
+                    print(key)
         if len(unexpected_keys) > 0:
-            print("Unexpected Key(s) in state_dict: ", end="")
-            for key in unexpected_keys:
-                print(key)
+            if dist.get_rank() == 0:
+                print("Unexpected Key(s) in state_dict: ", end="")
+                for key in unexpected_keys:
+                    print(key)
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
-            print("Model params after dim prune")
+            if dist.get_rank() == 0:
+                print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
         step = params.initial_step
         additional_step = params.additional_initial_step
@@ -603,7 +606,8 @@ def main(args):
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
-            print("Model params after dim prune")
+            if dist.get_rank() == 0:
+                print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
 
         if "optimizer" in state:
@@ -617,7 +621,8 @@ def main(args):
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
             model.prune_dim(p=args.dim_prune_prob)
-            print("Model params after dim prune")
+            if dist.get_rank() == 0:
+                print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
         broadcast(model)
 
