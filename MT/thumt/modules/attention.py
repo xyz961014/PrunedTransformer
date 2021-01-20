@@ -110,25 +110,26 @@ class MultiHeadAttentionBase(Module):
 
 class MultiHeadAttention(MultiHeadAttentionBase):
 
-    def __init__(self, hidden_size, num_heads, dropout=0.0,
+    def __init__(self, hidden_size, head_size, num_heads, dropout=0.0,
                  name="multihead_attention"):
         super(MultiHeadAttention, self).__init__(name=name)
 
         self.num_heads = num_heads
         self.hidden_size = hidden_size
+        self.head_size = head_size
         self.dropout = dropout
 
-        head_size = hidden_size // num_heads
-        self.head_size = head_size
+        attention_hidden_size = num_heads * head_size
+        self.attention_hidden_size = attention_hidden_size
 
         with utils.scope(name):
-            self.q_transform = Affine(hidden_size, hidden_size,
+            self.q_transform = Affine(hidden_size, attention_hidden_size,
                                       name="q_transform")
-            self.k_transform = Affine(hidden_size, hidden_size,
+            self.k_transform = Affine(hidden_size, attention_hidden_size,
                                       name="k_transform")
-            self.v_transform = Affine(hidden_size, hidden_size,
+            self.v_transform = Affine(hidden_size, attention_hidden_size,
                                       name="v_transform")
-            self.o_transform = Affine(hidden_size, hidden_size,
+            self.o_transform = Affine(attention_hidden_size, hidden_size,
                                       name="o_transform")
 
         self.reset_parameters()

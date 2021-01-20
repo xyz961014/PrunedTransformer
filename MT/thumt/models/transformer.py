@@ -22,8 +22,10 @@ class AttentionSubLayer(modules.Module):
         self.normalization = params.normalization
 
         with utils.scope(name):
-            self.attention = modules.MultiHeadAttention(
-                params.hidden_size, params.num_heads, params.attention_dropout)
+            self.attention = modules.MultiHeadAttention(params.hidden_size,
+                                                        params.head_size,
+                                                        params.num_heads, 
+                                                        params.attention_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
     def forward(self, x, bias, memory=None, state=None):
@@ -183,6 +185,7 @@ class Transformer(modules.Module):
             params.label_smoothing)
         self.dropout = params.residual_dropout
         self.hidden_size = params.hidden_size
+        self.attention_hidden_size = params.num_heads * params.head_size
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
         self.reset_parameters()
@@ -322,9 +325,9 @@ class Transformer(modules.Module):
         state = {
             "decoder": {
                 "layer_%d" % i: {
-                    "k": torch.zeros([batch_size, 0, self.hidden_size],
+                    "k": torch.zeros([batch_size, 0, self.attention_hidden_size],
                                      device=device),
-                    "v": torch.zeros([batch_size, 0, self.hidden_size],
+                    "v": torch.zeros([batch_size, 0, self.attention_hidden_size],
                                      device=device)
                 } for i in range(self.num_decoder_layers)
             }
@@ -353,6 +356,7 @@ class Transformer(modules.Module):
             hidden_size=512,
             filter_size=2048,
             num_heads=8,
+            head_size=64,
             num_encoder_layers=6,
             num_decoder_layers=6,
             attention_dropout=0.0,
