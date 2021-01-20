@@ -466,10 +466,10 @@ def main(args):
                 if step % params.eval_steps == 0:
                     eval_score = utils.evaluate(model, sorted_key, eval_dataset,
                                                 params.output, references, params)
-                    if target_score == 0 or abs(target_score - eval_score) <= args.dim_prune_threshold:
+                    if target_score == 0 or target_score - eval_score <= args.dim_prune_threshold:
                         target_score = eval_score
                         if dist.get_rank() == 0:
-                            print("Update target BLEU: {}".format(target_score))
+                            print("Update target BLEU: {:6f}".format(target_score))
                         # dim prune
                         index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
                         if index_len:
