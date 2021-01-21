@@ -466,7 +466,8 @@ def main(args):
                 if step % params.eval_steps == 0:
                     eval_score = utils.evaluate(model, sorted_key, eval_dataset,
                                                 params.output, references, params)
-                    print("Target BLEU: {:6f}".format(target_score))
+                    if dist.get_rank() == 0:
+                        print("Target BLEU: {:6f}".format(target_score))
                     eval_score = torch.tensor(eval_score).cuda()
                     dist.broadcast(eval_score, 0)
                     eval_score = eval_score.item()
@@ -477,8 +478,9 @@ def main(args):
                         # dim prune
                         index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
                         if index_len:
-                            index = torch.ones(model.hidden_size).multinomial(index_len)
+                            index = torch.ones(model.hidden_size).multinomial(index_len).cuda()
                             index = index.sort()[0]
+                            dist.broadcast(index, 0)
                         model.prune_dim(index=index)
                         optimizer.prune_dim(index, model.named_parameters())
                         if dist.get_rank() == 0:
