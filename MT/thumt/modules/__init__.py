@@ -4,6 +4,7 @@ from thumt.modules.attention import MultiHeadAttention
 from thumt.modules.attention import WeightedMultiHeadAttention
 from thumt.modules.attention import FitMultiHeadAttention
 from thumt.modules.attention import ThinMultiHeadAttention
+from thumt.modules.attention import HeadWiseMultiHeadAttention
 from thumt.modules.attention import SelectiveMultiHeadAttention
 from thumt.modules.attention import MultiHeadAdditiveAttention
 from thumt.modules.embedding import PositionalEmbedding

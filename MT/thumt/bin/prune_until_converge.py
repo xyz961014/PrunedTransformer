@@ -466,6 +466,10 @@ def main(args):
                 if step % params.eval_steps == 0:
                     eval_score = utils.evaluate(model, sorted_key, eval_dataset,
                                                 params.output, references, params)
+                    print("Target BLEU: {:6f}".format(target_score))
+                    eval_score = torch.tensor(eval_score).cuda()
+                    dist.broadcast(eval_score, 0)
+                    eval_score = eval_score.item()
                     if target_score == 0 or target_score - eval_score <= args.dim_prune_threshold:
                         target_score = eval_score
                         if dist.get_rank() == 0:
@@ -526,7 +530,6 @@ def main(args):
                         summary.close()
 
                     return
-
 
         epoch += 1
 

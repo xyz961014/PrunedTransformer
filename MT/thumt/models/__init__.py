@@ -10,6 +10,7 @@ import thumt.models.weighted_transformer
 import thumt.models.selective_transformer
 import thumt.models.fit_transformer
 import thumt.models.thin_transformer
+import thumt.models.headwise_transformer
 
 
 def get_model(name):
@@ -25,5 +26,7 @@ def get_model(name):
         return thumt.models.fit_transformer.FitTransformer
     elif name == "thin_transformer":
         return thumt.models.thin_transformer.ThinTransformer
+    elif name == "headwise_transformer":
+        return thumt.models.headwise_transformer.HeadWiseTransformer
     else:
         raise LookupError("Unknown model %s" % name)
