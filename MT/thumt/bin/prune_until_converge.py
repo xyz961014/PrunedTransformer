@@ -114,7 +114,7 @@ def default_params():
         learning_rate_values=[0.0],
         device_list=[0],
         # Checkpoint Saving
-        keep_checkpoint_max=20,
+        keep_checkpoint_max=250,
         keep_top_checkpoint_max=5,
         save_summary=True,
         save_checkpoint_secs=0,
