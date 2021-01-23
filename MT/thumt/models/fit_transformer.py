@@ -8,6 +8,7 @@ from __future__ import print_function
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import thumt.utils as utils
 import thumt.modules as modules
@@ -20,6 +21,7 @@ class FitAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.dim_dropout = params.dim_dropout
 
         with utils.scope(name):
             self.attention = modules.FitMultiHeadAttention(
@@ -43,7 +45,10 @@ class FitAttentionSubLayer(modules.Module):
             y, k, v = self.attention(y, bias, memory, kv)
             state["k"], state["v"] = k, v
 
-        y = utils.dim_dropout(y, self.dropout, self.training, dim=-1)
+        if self.dim_dropout:
+            y = utils.dim_dropout(y, self.dropout, self.training, dim=-1)
+        else:
+            y = F.dropout(y, self.dropout, self.training)
 
         if self.normalization == "before":
             return x + y
@@ -58,6 +63,7 @@ class FitFFNSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.dim_dropout = params.dim_dropout
 
         with utils.scope(name):
             self.ffn_layer = modules.FitFeedForward(params.hidden_size,
@@ -76,7 +82,10 @@ class FitFFNSubLayer(modules.Module):
             y = x
 
         y = self.ffn_layer(y)
-        y = utils.dim_dropout(y, self.dropout, self.training, dim=-1)
+        if self.dim_dropout:
+            y = utils.dim_dropout(y, self.dropout, self.training, dim=-1)
+        else:
+            y = F.dropout(y, self.dropout, self.training)
 
         if self.normalization == "before":
             return x + y
@@ -211,6 +220,7 @@ class FitTransformer(modules.Module):
         self.criterion = modules.SmoothedCrossEntropyLoss(
             params.label_smoothing)
         self.dropout = params.residual_dropout
+        self.dim_dropout = params.dim_dropout
         self.hidden_size = params.hidden_size
         self.attn_hidden_size = params.hidden_size
         self.num_encoder_layers = params.num_encoder_layers
@@ -365,7 +375,10 @@ class FitTransformer(modules.Module):
         inputs = torch.nn.functional.embedding(src_seq, self.src_embedding)
         inputs = inputs * (self.hidden_size ** 0.5)
         inputs = inputs + self.bias
-        inputs = utils.dim_dropout(self.encoding(inputs), self.dropout, self.training, dim=-1)
+        if self.dim_dropout:
+            inputs = utils.dim_dropout(self.encoding(inputs), self.dropout, self.training, dim=-1)
+        else:
+            inputs = F.dropout(self.encoding(inputs), self.dropout, self.training)
 
         enc_attn_bias = enc_attn_bias.to(inputs)
         encoder_output = self.encoder(inputs, enc_attn_bias)
@@ -387,7 +400,10 @@ class FitTransformer(modules.Module):
         decoder_input = torch.cat(
             [targets.new_zeros([targets.shape[0], 1, targets.shape[-1]]),
              targets[:, 1:, :]], dim=1)
-        decoder_input = utils.dim_dropout(self.encoding(decoder_input), self.dropout, self.training, dim=-1)
+        if self.dim_dropout:
+            decoder_input = utils.dim_dropout(self.encoding(decoder_input), self.dropout, self.training, dim=-1)
+        else:
+            decoder_input = F.dropout(self.encoding(decoder_input), self.dropout, self.training)
 
         encoder_output = state["encoder_output"]
         dec_attn_bias = dec_attn_bias.to(targets)
@@ -472,6 +488,7 @@ class FitTransformer(modules.Module):
             normalization="after",
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
+            dim_dropout=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
