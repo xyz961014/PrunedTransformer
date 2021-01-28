@@ -160,7 +160,7 @@ class MoEGate(Module):
         weight = F.softmax(weight.masked_fill(select_bool.eq(0), -float("inf")), dim=-1)
         self.experts_balance_loss = self.compute_experts_balance_loss(weight)
 
-        return selected_gates, indexes
+        return selected_gates, select_bool
 
     def reset_parameters(self, initializer="uniform_scaling", **kwargs):
         if initializer == "uniform_scaling":
@@ -202,23 +202,14 @@ class MoEFeedForward(Module):
     def forward(self, x):
         batch_size, seq_len, input_size = x.size(0), x.size(1), x.size(2)
         gates, indexes = self.moe_gate(x)
-        input_transform_weight = self.input_transform_weight.index_select(0, indexes.reshape(-1))
-        input_transform_weight = input_transform_weight.reshape(batch_size, seq_len, self.topk, 
-                                                                self.input_size, self.hidden_size)
-        input_transform_bias = self.input_transform_bias.index_select(0, indexes.reshape(-1))
-        input_transform_bias = input_transform_bias.reshape(batch_size, seq_len, self.topk, self.hidden_size)
+        selected_x = torch.einsum("blk,bli->blik", indexes, x)
+        input_transform_bias = torch.einsum("blk,kh->blkh", indexes, self.input_transform_bias)
 
-        output_transform_weight = self.output_transform_weight.index_select(0, indexes.reshape(-1))
-        output_transform_weight = output_transform_weight.reshape(batch_size, seq_len, self.topk, 
-                                                                self.hidden_size, self.output_size)
-        output_transform_bias = self.output_transform_bias.index_select(0, indexes.reshape(-1))
-        output_transform_bias = output_transform_bias.reshape(batch_size, seq_len, self.topk, self.output_size)
-
-        h = F.relu(torch.einsum("blkih,bli->blkh", input_transform_weight, x) + input_transform_bias)
+        h = F.relu(torch.einsum("kih,blik->blkh", self.input_transform_weight, selected_x) + input_transform_bias)
         h = F.dropout(h, self.dropout, self.training)
-        h = torch.einsum("blkho,blkh->blko", output_transform_weight, h) + output_transform_bias
 
-        h = torch.einsum("blko,blk->blo", h, gates)
+        output_transform_bias = torch.einsum("blk,ko->blo", indexes, self.output_transform_bias)
+        h = torch.einsum("kho,blkh->blo", self.output_transform_weight, h) + output_transform_bias
         
         return h
 
