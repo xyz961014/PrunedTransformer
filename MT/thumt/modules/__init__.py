@@ -8,7 +8,7 @@ from thumt.modules.attention import HeadWiseMultiHeadAttention
 from thumt.modules.attention import SelectiveMultiHeadAttention
 from thumt.modules.attention import MultiHeadAdditiveAttention
 from thumt.modules.embedding import PositionalEmbedding
-from thumt.modules.feed_forward import FeedForward, WeightedFeedForward, FitFeedForward 
+from thumt.modules.feed_forward import FeedForward, WeightedFeedForward, FitFeedForward, MoEFeedForward
 from thumt.modules.layer_norm import LayerNorm, FitLayerNorm
 from thumt.modules.losses import SmoothedCrossEntropyLoss
 from thumt.modules.module import Module

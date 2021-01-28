@@ -11,6 +11,7 @@ import thumt.models.selective_transformer
 import thumt.models.fit_transformer
 import thumt.models.thin_transformer
 import thumt.models.headwise_transformer
+import thumt.models.moe_transformer
 
 
 def get_model(name):
@@ -28,5 +29,7 @@ def get_model(name):
         return thumt.models.thin_transformer.ThinTransformer
     elif name == "headwise_transformer":
         return thumt.models.headwise_transformer.HeadWiseTransformer
+    elif name == "moe_transformer":
+        return thumt.models.moe_transformer.MoETransformer
     else:
         raise LookupError("Unknown model %s" % name)

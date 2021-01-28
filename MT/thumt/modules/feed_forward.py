@@ -128,3 +128,104 @@ class FitFeedForward(Module):
         nn.init.constant_(self.output_transform.bias, 0.0)
 
 
+class MoEGate(Module):
+
+    def __init__(self, hidden_size, num_experts, topk, name="moe_gate"):
+        super(MoEGate, self).__init__(name=name)
+
+        self.hidden_size = hidden_size
+        self.num_experts = num_experts
+        self.topk = topk
+
+        self.experts_balance_loss = 0.
+
+        with utils.scope(name):
+            self.gate_transform = Affine(hidden_size, num_experts, bias=False)
+            self.gate_noise = Affine(hidden_size, num_experts, bias=False)
+
+        self.reset_parameters()
+
+    def compute_experts_balance_loss(self, weight):
+        sum_weight = weight.sum(dim=(0, 1))
+        coefficient_of_variance = sum_weight.std() / sum_weight.mean()
+        return coefficient_of_variance ** 2
+
+    def forward(self, x):
+        weight = self.gate_transform(x) + F.softplus(self.gate_noise(x)) * x.new_zeros(self.num_experts).normal_()
+        gates, indexes = weight.topk(self.topk)
+        selected_gates = F.softmax(gates, dim=-1)
+        
+        select_bool = torch.eye(self.num_experts).to(x).index_select(0, indexes.reshape(-1))
+        select_bool = select_bool.reshape(indexes.size(0), indexes.size(1), self.topk, self.num_experts).sum(dim=2)
+        weight = F.softmax(weight.masked_fill(select_bool.eq(0), -float("inf")), dim=-1)
+        self.experts_balance_loss = self.compute_experts_balance_loss(weight)
+
+        return selected_gates, indexes
+
+    def reset_parameters(self, initializer="uniform_scaling", **kwargs):
+        if initializer == "uniform_scaling":
+            nn.init.xavier_uniform_(self.gate_transform.weight, 2 ** -0.5)
+            nn.init.xavier_uniform_(self.gate_noise.weight, 2 ** -0.5)
+        else:
+            raise ValueError("Unknown initializer %d" % initializer)
+
+
+class MoEFeedForward(Module):
+
+    def __init__(self, num_experts, topk, input_size, hidden_size, output_size=None, dropout=0.0,
+                 name="feed_forward"):
+        super(MoEFeedForward, self).__init__(name=name)
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size or input_size
+        self.dropout = dropout
+
+        self.num_experts = num_experts
+        self.topk = topk
+
+        with utils.scope(name):
+            self.moe_gate = MoEGate(input_size, num_experts, topk)
+
+            self.input_transform_weight = nn.Parameter(torch.empty(num_experts, input_size, hidden_size))
+            self.input_transform_bias = nn.Parameter(torch.empty(num_experts, hidden_size))
+            self.output_transform_weight = nn.Parameter(torch.empty(num_experts, hidden_size, self.output_size))
+            self.output_transform_bias = nn.Parameter(torch.empty(num_experts, self.output_size))
+
+            self.add_name(self.input_transform_weight, "input_transform_weight")
+            self.add_name(self.input_transform_bias, "input_transform_bias")
+            self.add_name(self.output_transform_weight, "output_transform_weight")
+            self.add_name(self.output_transform_bias, "output_transform_bias")
+
+        self.reset_parameters()
+
+    def forward(self, x):
+        batch_size, seq_len, input_size = x.size(0), x.size(1), x.size(2)
+        gates, indexes = self.moe_gate(x)
+        input_transform_weight = self.input_transform_weight.index_select(0, indexes.reshape(-1))
+        input_transform_weight = input_transform_weight.reshape(batch_size, seq_len, self.topk, 
+                                                                self.input_size, self.hidden_size)
+        input_transform_bias = self.input_transform_bias.index_select(0, indexes.reshape(-1))
+        input_transform_bias = input_transform_bias.reshape(batch_size, seq_len, self.topk, self.hidden_size)
+
+        output_transform_weight = self.output_transform_weight.index_select(0, indexes.reshape(-1))
+        output_transform_weight = output_transform_weight.reshape(batch_size, seq_len, self.topk, 
+                                                                self.hidden_size, self.output_size)
+        output_transform_bias = self.output_transform_bias.index_select(0, indexes.reshape(-1))
+        output_transform_bias = output_transform_bias.reshape(batch_size, seq_len, self.topk, self.output_size)
+
+        h = F.relu(torch.einsum("blkih,bli->blkh", input_transform_weight, x) + input_transform_bias)
+        h = F.dropout(h, self.dropout, self.training)
+        h = torch.einsum("blkho,blkh->blko", output_transform_weight, h) + output_transform_bias
+
+        h = torch.einsum("blko,blk->blo", h, gates)
+        
+        return h
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.input_transform_weight)
+        nn.init.xavier_uniform_(self.output_transform_weight)
+        nn.init.constant_(self.input_transform_bias, 0.0)
+        nn.init.constant_(self.output_transform_bias, 0.0)
+
+
