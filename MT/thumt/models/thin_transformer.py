@@ -32,9 +32,12 @@ class ThinAttentionSubLayer(modules.Module):
                 self.layer_norm = modules.LayerNorm(params.hidden_size)
             else:
                 self.layer_norm = modules.LayerNorm(attention_hidden_size)
-            self.residual_transform = modules.Affine(params.hidden_size, attention_hidden_size,
-                                                     name="residual_transform")
-        self.reset_parameters()
+            if params.residual_transform:
+                self.residual_transform = modules.Affine(params.hidden_size, attention_hidden_size,
+                                                         name="residual_transform")
+                self.reset_parameters()
+            else:
+                self.residual_transform = lambda x: x
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -77,9 +80,12 @@ class ThinFFNSubLayer(modules.Module):
                                                  ffn_filter_size,
                                                  dropout=params.relu_dropout)
             self.layer_norm = modules.LayerNorm(ffn_hidden_size)
-            self.outer_transform = modules.Affine(ffn_hidden_size, params.hidden_size,
-                                                   name="outer_transform")
-        self.reset_parameters()
+            if params.outer_transform:
+                self.outer_transform = modules.Affine(ffn_hidden_size, params.hidden_size,
+                                                       name="outer_transform")
+                self.reset_parameters()
+            else:
+                self.outer_transform = lambda x: x
 
     def forward(self, x):
         if self.normalization == "before":
@@ -125,13 +131,16 @@ class ThinTransformerDecoderLayer(modules.Module):
         with utils.scope(name):
             self.self_attention = ThinAttentionSubLayer(params,
                                                         name="self_attention")
-            self.output_transform = modules.Affine(attention_hidden_size, params.hidden_size,
-                                                   name="output_transform")
+            if params.output_transform:
+                self.output_transform = modules.Affine(attention_hidden_size, params.hidden_size,
+                                                       name="output_transform")
+                self.reset_parameters()
+            else:
+                self.output_transform = lambda x: x
             self.encdec_attention = ThinAttentionSubLayer(params,
                                                           name="encdec_attention")
             self.feed_forward = ThinFFNSubLayer(params)
 
-        self.reset_parameters()
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         x = self.self_attention(x, attn_bias, state=state)
@@ -398,6 +407,9 @@ class ThinTransformer(modules.Module):
             normalization="after",
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
+            residual_transform=True,
+            outer_transform=True,
+            output_transform=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
