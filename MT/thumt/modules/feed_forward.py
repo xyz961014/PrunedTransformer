@@ -152,15 +152,20 @@ class MoEGate(Module):
 
     def forward(self, x):
         weight = self.gate_transform(x) + F.softplus(self.gate_noise(x)) * x.new_zeros(self.num_experts).normal_()
-        gates, indexes = weight.topk(self.topk)
+        # average on batch and token
+        gates, indexes = weight.mean(dim=(0, 1)).topk(self.topk)
         selected_gates = F.softmax(gates, dim=-1)
         
-        select_bool = torch.eye(self.num_experts).to(x).index_select(0, indexes.reshape(-1))
-        select_bool = select_bool.reshape(indexes.size(0), indexes.size(1), self.topk, self.num_experts).sum(dim=2)
+        _, examplewise_indexes = weight.topk(self.topk)
+        select_bool = torch.eye(self.num_experts).to(x).index_select(0, examplewise_indexes.reshape(-1))
+        select_bool = select_bool.reshape(examplewise_indexes.size(0), 
+                                          examplewise_indexes.size(1), 
+                                          self.topk, 
+                                          self.num_experts).sum(dim=2)
         weight = F.softmax(weight.masked_fill(select_bool.eq(0), -float("inf")), dim=-1)
         self.experts_balance_loss = self.compute_experts_balance_loss(weight)
 
-        return selected_gates, select_bool
+        return selected_gates, indexes
 
     def reset_parameters(self, initializer="uniform_scaling", **kwargs):
         if initializer == "uniform_scaling":
@@ -202,14 +207,21 @@ class MoEFeedForward(Module):
     def forward(self, x):
         batch_size, seq_len, input_size = x.size(0), x.size(1), x.size(2)
         gates, indexes = self.moe_gate(x)
-        selected_x = torch.einsum("blk,bli->blik", indexes, x)
-        input_transform_bias = torch.einsum("blk,kh->blkh", indexes, self.input_transform_bias)
+        input_transform_weight = self.input_transform_weight.index_select(0, indexes.reshape(-1))
+        input_transform_weight = input_transform_weight.reshape(self.topk, self.input_size, self.hidden_size)
+        input_transform_bias = self.input_transform_bias.index_select(0, indexes.reshape(-1))
+        input_transform_bias = input_transform_bias.reshape(self.topk, self.hidden_size)
 
-        h = F.relu(torch.einsum("kih,blik->blkh", self.input_transform_weight, selected_x) + input_transform_bias)
+        output_transform_weight = self.output_transform_weight.index_select(0, indexes.reshape(-1))
+        output_transform_weight = output_transform_weight.reshape(self.topk, self.hidden_size, self.output_size)
+        output_transform_bias = self.output_transform_bias.index_select(0, indexes.reshape(-1))
+        output_transform_bias = output_transform_bias.reshape(self.topk, self.output_size)
+
+        h = F.relu(torch.einsum("kih,bli->blkh", input_transform_weight, x) + input_transform_bias)
         h = F.dropout(h, self.dropout, self.training)
+        h = torch.einsum("kho,blkh->blko", output_transform_weight, h) + output_transform_bias
 
-        output_transform_bias = torch.einsum("blk,ko->blo", indexes, self.output_transform_bias)
-        h = torch.einsum("kho,blkh->blo", self.output_transform_weight, h) + output_transform_bias
+        h = torch.einsum("blko,k->blo", h, gates)
         
         return h
 
