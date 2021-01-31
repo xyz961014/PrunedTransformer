@@ -231,4 +231,46 @@ class MoEFeedForward(Module):
         nn.init.constant_(self.input_transform_bias, 0.0)
         nn.init.constant_(self.output_transform_bias, 0.0)
 
+class PickyFeedForward(Module):
+
+    def __init__(self, input_size, hidden_size, output_size=None, dropout=0.0,
+                 weight_function="sigmoid",
+                 name="feed_forward"):
+        super(PickyFeedForward, self).__init__(name=name)
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size or input_size
+        self.dropout = dropout
+        
+        self.additional_params = {}
+
+        if weight_function == "sigmoid":
+            self.compute_weight = torch.sigmoid
+        elif weight_function == "softmax":
+            self.compute_weight = lambda x: F.softmax(x, dim=0)
+
+        with utils.scope(name):
+            self.input_transform = Affine(input_size, hidden_size,
+                                          name="input_transform")
+            self.output_transform = Affine(hidden_size, self.output_size,
+                                           name="output_transform")
+
+        self.reset_parameters()
+
+    def forward(self, x):
+        # apply soft weights
+        weights = self.compute_weight(self.additional_params["ffn_input_weight"])
+        x = torch.einsum("d,bld->bld", weights, x)
+
+        h = F.relu(self.input_transform(x))
+        h = F.dropout(h, self.dropout, self.training)
+        return self.output_transform(h)
+
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.input_transform.weight)
+        nn.init.xavier_uniform_(self.output_transform.weight)
+        nn.init.constant_(self.input_transform.bias, 0.0)
+        nn.init.constant_(self.output_transform.bias, 0.0)
+
 
