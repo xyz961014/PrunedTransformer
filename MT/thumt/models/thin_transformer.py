@@ -60,7 +60,7 @@ class ThinAttentionSubLayer(modules.Module):
             return self.layer_norm(self.residual_transform(x) + y)
 
     def reset_parameters(self):
-        nn.init.constant_(self.residual_transform.weight, 1.0)
+        nn.init.eye_(self.residual_transform.weight)
         nn.init.constant_(self.residual_transform.bias, 0.0)
 
 
@@ -102,7 +102,7 @@ class ThinFFNSubLayer(modules.Module):
             return self.outer_transform(self.layer_norm(x + y))
 
     def reset_parameters(self):
-        nn.init.constant_(self.outer_transform.weight, 1.0)
+        nn.init.eye_(self.outer_transform.weight)
         nn.init.constant_(self.outer_transform.bias, 0.0)
 
 
@@ -168,7 +168,7 @@ class ThinTransformerDecoderLayer(modules.Module):
             return y
 
     def reset_parameters(self):
-        nn.init.constant_(self.output_transform.weight, 1.0)
+        nn.init.eye_(self.output_transform.weight)
         nn.init.constant_(self.output_transform.bias, 0.0)
 
 
