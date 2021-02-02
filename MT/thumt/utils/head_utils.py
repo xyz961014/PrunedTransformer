@@ -50,6 +50,8 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0, scale: bool
         :obj:`torch.nn.Linear`: The pruned layer as a new layer with :obj:`requires_grad=True`.
     """
     from thumt.modules import Affine, WeightedAffine
+    if not isinstance(index, torch.Tensor):
+        index = torch.Tensor(index).long()
     index = index.to(layer.weight.device)
     W = layer.weight.index_select(dim, index).clone().detach()
     if scale:
@@ -82,6 +84,23 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0, scale: bool
     return new_layer
 
 
+def prune_vector(vector, index, scale=False):
+    if not isinstance(index, torch.Tensor):
+        index = torch.Tensor(index).long()
+    index = index.to(vector.device)
+
+    V = vector.index_select(0, index).clone().detach()
+    if scale:
+        scale = vector.size(0) / index.size(0)
+        V.mul_(scale)
+
+    new_size = index.size(0)
+    new_vector = nn.Parameter(torch.empty(new_size)).to(vector.device)
+    new_vector.requires_grad = False
+    new_vector.copy_(V.contiguous())
+    new_vector.requires_grad = True
+    return new_vector
+
 def selected_linear(layer, index, dim=0):
 
     index = index.to(layer.weight.device)
@@ -95,7 +114,7 @@ def selected_linear(layer, index, dim=0):
     return lambda x: F.linear(x, W, bias=b if layer.bias is not None else None)
 
 
-def prune_vector(vector: torch.nn.Parameter, heads: Set[int], n_heads: int, already_pruned_heads: Set[int]) -> torch.nn.Parameter:
+def prune_head_vector(vector: torch.nn.Parameter, heads: Set[int], n_heads: int, already_pruned_heads: Set[int]) -> torch.nn.Parameter:
     """
     Prune head weight in pruned head
     """

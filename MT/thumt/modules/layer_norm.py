@@ -72,6 +72,8 @@ class FitLayerNorm(Module):
         self.reset_parameters()
 
     def prune_dim(self, index):
+        if not isinstance(index, torch.Tensor):
+            index = torch.Tensor(index).long()
         index = index.to(self.weight.device)
         new_shape = (index.size(0),)
         self.normalized_shape = new_shape

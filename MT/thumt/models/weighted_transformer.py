@@ -15,7 +15,7 @@ import torch.nn.functional as F
 
 import thumt.utils as utils
 import thumt.modules as modules
-from thumt.utils import prune_linear_layer, prune_vector
+from thumt.utils import prune_linear_layer, prune_head_vector
 
 class AttentionSubLayer(modules.Module):
 
@@ -141,8 +141,8 @@ class WeightedAttentionSubLayer(modules.Module):
         self.attention.v_transform = prune_linear_layer(self.attention.v_transform, index)
         self.attention.o_transform = prune_linear_layer(self.attention.o_transform, index, dim=1)
         if self.enable_kappa:
-            self.attention.kappa = prune_vector(self.attention.kappa, heads, 
-                                                self.attention.num_heads, pruned_heads)
+            self.attention.kappa = prune_head_vector(self.attention.kappa, heads, 
+                                                     self.attention.num_heads, pruned_heads)
 
         # Update hyper params
         self.attention.num_heads = self.attention.num_heads - len(heads)

@@ -633,6 +633,13 @@ def main(args):
 
     counter = 0
 
+    heads_to_prune = model.find_pruneable_heads(0.1)
+    indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+    model.prune_heads(heads_to_prune)
+    model.prune_dim(indexes_to_prune)
+    import ipdb
+    ipdb.set_trace()
+
     while True:
         start_time = time.time()
 

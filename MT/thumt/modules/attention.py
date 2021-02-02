@@ -1066,6 +1066,12 @@ class PickyMultiHeadAttention(MultiHeadAttentionBase):
 
         self.reset_parameters()
 
+    def prune_dim(self, index):
+        if len(index["input"]) == 0:
+            return
+        index_to_select = utils.reverse_select(index["input"], self.o_transform.weight.size(0))
+        self.o_transform = utils.prune_linear_layer(self.o_transform, index_to_select, dim=0, scale=True)
+
     def forward(self, query, bias, memory=None, kv=None):
         q = self.q_transform(query)
 

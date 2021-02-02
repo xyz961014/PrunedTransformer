@@ -60,7 +60,7 @@ class ThinAttentionSubLayer(modules.Module):
             return self.layer_norm(self.residual_transform(x) + y)
 
     def reset_parameters(self):
-        nn.init.xavier_uniform_(self.residual_transform.weight)
+        nn.init.constant_(self.residual_transform.weight, 1.0)
         nn.init.constant_(self.residual_transform.bias, 0.0)
 
 
@@ -102,7 +102,7 @@ class ThinFFNSubLayer(modules.Module):
             return self.outer_transform(self.layer_norm(x + y))
 
     def reset_parameters(self):
-        nn.init.xavier_uniform_(self.outer_transform.weight)
+        nn.init.constant_(self.outer_transform.weight, 1.0)
         nn.init.constant_(self.outer_transform.bias, 0.0)
 
 
@@ -111,14 +111,24 @@ class ThinTransformerEncoderLayer(modules.Module):
     def __init__(self, params, name="layer"):
         super(ThinTransformerEncoderLayer, self).__init__(name=name)
 
+        self.skip_residule = params.skip_residule
+
         with utils.scope(name):
             self.self_attention = ThinAttentionSubLayer(params)
             self.feed_forward = ThinFFNSubLayer(params)
 
+            if params.skip_residule:
+                self.layer_norm = modules.LayerNorm(params.hidden_size)
+
+
     def forward(self, x, bias):
-        x = self.self_attention(x, bias)
-        x = self.feed_forward(x)
-        return x
+        y = self.self_attention(x, bias)
+        y = self.feed_forward(y)
+
+        if self.skip_residule:
+            return self.layer_norm(x + y)
+        else:
+            return y
 
 
 class ThinTransformerDecoderLayer(modules.Module):
@@ -127,6 +137,7 @@ class ThinTransformerDecoderLayer(modules.Module):
         super(ThinTransformerDecoderLayer, self).__init__(name=name)
 
         attention_hidden_size = params.num_heads * params.head_size
+        self.skip_residule = params.skip_residule
 
         with utils.scope(name):
             self.self_attention = ThinAttentionSubLayer(params,
@@ -141,16 +152,23 @@ class ThinTransformerDecoderLayer(modules.Module):
                                                           name="encdec_attention")
             self.feed_forward = ThinFFNSubLayer(params)
 
+            if params.skip_residule:
+                self.layer_norm = modules.LayerNorm(params.hidden_size)
+
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
-        x = self.self_attention(x, attn_bias, state=state)
-        x = self.output_transform(x)
-        x = self.encdec_attention(x, encdec_bias, memory)
-        x = self.feed_forward(x)
-        return x
+        y = self.self_attention(x, attn_bias, state=state)
+        y = self.output_transform(y)
+        y = self.encdec_attention(y, encdec_bias, memory)
+        y = self.feed_forward(y)
+
+        if self.skip_residule:
+            return self.layer_norm(x + y)
+        else:
+            return y
 
     def reset_parameters(self):
-        nn.init.xavier_uniform_(self.output_transform.weight)
+        nn.init.constant_(self.output_transform.weight, 1.0)
         nn.init.constant_(self.output_transform.bias, 0.0)
 
 
@@ -410,6 +428,7 @@ class ThinTransformer(modules.Module):
             residual_transform=True,
             outer_transform=True,
             output_transform=True,
+            skip_residule=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

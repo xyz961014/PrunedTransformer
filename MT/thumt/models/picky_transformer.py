@@ -13,6 +13,8 @@ import torch.nn.functional as F
 import thumt.utils as utils
 import thumt.modules as modules
 
+from thumt.utils import prune_linear_layer, prune_vector
+
 
 class PickyAttentionSubLayer(modules.Module):
 
@@ -28,7 +30,7 @@ class PickyAttentionSubLayer(modules.Module):
                                                              params.num_heads, 
                                                              params.attention_dropout,
                                                              params.weight_function)
-            self.layer_norm = modules.LayerNorm(params.hidden_size)
+            self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
     def _prune_heads(self, heads, pruned_heads):
         if len(heads) == 0:
@@ -49,6 +51,11 @@ class PickyAttentionSubLayer(modules.Module):
         # Update hyper params
         self.attention.num_heads = self.attention.num_heads - len(heads)
         self.attention.hidden_size = self.attention.head_size * self.attention.num_heads
+
+    def prune_dim(self, index):
+        self.attention.prune_dim(index)
+        if not self.normalization == "before":
+            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -94,7 +101,7 @@ class PickyFFNSubLayer(modules.Module):
 
     def prune_dim(self, index):
         self.ffn_layer.prune_dim(index)
-        self.layer_norm.prune_dim(index)
+        self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
     def forward(self, x):
         if self.normalization == "before":
@@ -131,6 +138,12 @@ class PickyTransformerEncoderLayer(modules.Module):
             self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.additional_params.append(self.ffn_input_weight)
+            self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+            self.additional_params.append(self.ffn_inter_weight)
+            self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+            self.add_name(self.ffn_output_weight, "ffn_output_weight")
+            self.additional_params.append(self.ffn_output_weight)
 
         self.pruned_heads = set()
         nn.init.constant_(self.kappa, 0.0)
@@ -140,16 +153,32 @@ class PickyTransformerEncoderLayer(modules.Module):
         additional_params_dict = dict()
         additional_params_dict["kappa"] = self.kappa
         additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
+        additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
+        additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
         self.self_attention.attention.additional_params = additional_params_dict
         self.feed_forward.ffn_layer.additional_params = additional_params_dict
 
     def prune_heads(self, heads):
-        self.self_attention._prune_heads(heads, self.pruned_heads)
-        self.pruned_heads = self.pruned_heads.union(heads)
+        if len(heads) > 0:
+            self.self_attention._prune_heads(heads, self.pruned_heads)
+            self.pruned_heads = self.pruned_heads.union(heads)
+            
+            remain_heads = utils.reverse_select(heads, self.kappa.size(0))
+            self.kappa = prune_vector(self.kappa, remain_heads, scale=False)
 
     def prune_dim(self, index):
+        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
+            return
         self.self_attention.prune_dim(index)
         self.feed_forward.prune_dim(index)
+
+        input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+        inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+        output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+
+        self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+        self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
+        self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
 
     def forward(self, x, bias):
         self.load_additional_params()
@@ -184,6 +213,12 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.additional_params.append(self.ffn_input_weight)
+            self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+            self.additional_params.append(self.ffn_inter_weight)
+            self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+            self.add_name(self.ffn_output_weight, "ffn_output_weight")
+            self.additional_params.append(self.ffn_output_weight)
 
         self.self_pruned_heads = set()
         self.encdec_pruned_heads = set()
@@ -197,6 +232,8 @@ class PickyTransformerDecoderLayer(modules.Module):
         self_additional_params_dict["kappa"] = self.self_kappa
         encdec_additional_params_dict["kappa"] = self.encdec_kappa
         encdec_additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
+        encdec_additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
+        encdec_additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
         self.self_attention.attention.additional_params = self_additional_params_dict
         self.encdec_attention.attention.additional_params = encdec_additional_params_dict
         self.feed_forward.ffn_layer.additional_params = encdec_additional_params_dict
@@ -234,7 +271,7 @@ class PickyTransformerEncoder(modules.Module):
                 PickyTransformerEncoderLayer(params, name="layer_%d" % i)
                 for i in range(params.num_encoder_layers)])
             if self.normalization == "before":
-                self.layer_norm = modules.LayerNorm(params.hidden_size)
+                self.layer_norm = modules.FitLayerNorm(params.hidden_size)
             else:
                 self.layer_norm = None
 
@@ -251,10 +288,10 @@ class PickyTransformerEncoder(modules.Module):
             self.layers[layer].prune_heads(heads)
 
     def prune_dim(self, indexes):
-        for index, layer in list(zip(indexes, self.layers)):
+        for (_, index), layer in list(zip(indexes.items(), self.layers)):
             layer.prune_dim(index)
         if self.normalization == "before":
-            self.layer_norm.prune_dim(index)
+            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
     def forward(self, x, bias):
         for layer in self.layers:
@@ -279,7 +316,7 @@ class PickyTransformerDecoder(modules.Module):
                 for i in range(params.num_decoder_layers)])
 
             if self.normalization == "before":
-                self.layer_norm = modules.LayerNorm(params.hidden_size)
+                self.layer_norm = modules.FitLayerNorm(params.hidden_size)
             else:
                 self.layer_norm = None
 
@@ -300,10 +337,10 @@ class PickyTransformerDecoder(modules.Module):
             self.layers[layer].encdec_prune_heads(heads)
 
     def prune_dim(self, indexes):
-        for index, layer in list(zip(indexes, self.layers)):
+        for (_, index), layer in list(zip(indexes.items(), self.layers)):
             layer.prune_dim(index)
         if self.normalization == "before":
-            self.layer_norm.prune_dim(index)
+            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
@@ -400,6 +437,105 @@ class PickyTransformer(modules.Module):
             nn.init.normal_(self.softmax_weights, mean=0.0,
                             std=self.params.hidden_size ** -0.5)
 
+    def find_pruneable_heads(self, p):
+        with torch.no_grad():
+            heads_to_prune = {
+                    "encoder": {layer: [] for layer, _ in enumerate(self.encoder.layers)},
+                    "decoder": {layer: [] for layer, _ in enumerate(self.decoder.layers)},
+                    "encdec": {layer: [] for layer, _ in enumerate(self.decoder.layers)}
+                             }
+            #TODO:delete normal_
+            encoder_kappa = torch.cat([layer.kappa.normal_() for layer in self.encoder.layers])
+            decoder_kappa = torch.cat([layer.self_kappa.normal_() for layer in self.decoder.layers])
+            encdec_kappa = torch.cat([layer.encdec_kappa.normal_() for layer in self.decoder.layers])
+            all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
+
+            num_heads_to_prune = math.floor(p * all_kappa.size(0))
+            threshold = all_kappa.sort()[0][num_heads_to_prune].item()
+
+            for num_layer, layer in enumerate(self.encoder.layers):
+                for num_head, k in enumerate(layer.kappa):
+                    if k.item() < threshold:
+                        heads_to_prune["encoder"][num_layer].append(num_head)
+
+            for num_layer, layer in enumerate(self.decoder.layers):
+                for num_head, k in enumerate(layer.self_kappa):
+                    if k.item() < threshold:
+                        heads_to_prune["decoder"][num_layer].append(num_head)
+                for num_head, k in enumerate(layer.encdec_kappa):
+                    if k.item() < threshold:
+                        heads_to_prune["encdec"][num_layer].append(num_head)
+                
+        return heads_to_prune
+
+    def find_pruneable_dim(self, heads_to_prune):
+        """
+            return dims to prune
+        """
+        with torch.no_grad():
+            indexes_to_prune = {
+                    "encoder": {layer: {"input": [], "inter": [], "output": []} 
+                                for layer, _ in enumerate(self.encoder.layers)},
+                    "decoder": {layer: {"input": [], "inter": [], "output": []} 
+                                for layer, _ in enumerate(self.decoder.layers)}
+                               }
+
+            for layer_num, heads in heads_to_prune["encoder"].items():
+                if len(heads) > 0:
+                    layer = self.encoder.layers[layer_num]
+                    ffn_input_weight = layer.ffn_input_weight
+                    ffn_inter_weight = layer.ffn_inter_weight
+                    ffn_output_weight = layer.ffn_output_weight
+
+                    prune_ratio = len(heads) / layer.self_attention.attention.num_heads
+                    
+                    input_dim_to_prune = math.floor(prune_ratio * ffn_input_weight.size(0))
+                    input_indexes_to_prune = ffn_input_weight.topk(input_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["encoder"][layer_num]["input"] = input_indexes_to_prune
+
+                    inter_dim_to_prune = math.floor(prune_ratio * ffn_inter_weight.size(0))
+                    inter_indexes_to_prune = ffn_inter_weight.topk(inter_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["encoder"][layer_num]["inter"] = inter_indexes_to_prune
+
+                    output_dim_to_prune = math.floor(prune_ratio * ffn_output_weight.size(0))
+                    output_indexes_to_prune = ffn_output_weight.topk(output_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["encoder"][layer_num]["output"] = output_indexes_to_prune
+
+            for layer_num, heads in heads_to_prune["encdec"].items():
+                if len(heads) > 0:
+                    layer = self.decoder.layers[layer_num]
+                    ffn_input_weight = layer.ffn_input_weight
+                    ffn_inter_weight = layer.ffn_inter_weight
+                    ffn_output_weight = layer.ffn_output_weight
+
+                    prune_ratio = len(heads) / layer.self_attention.attention.num_heads
+                    
+                    input_dim_to_prune = math.floor(prune_ratio * ffn_input_weight.size(0))
+                    input_indexes_to_prune = ffn_input_weight.topk(input_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["decoder"][layer_num]["input"] = input_indexes_to_prune
+
+                    inter_dim_to_prune = math.floor(prune_ratio * ffn_inter_weight.size(0))
+                    inter_indexes_to_prune = ffn_inter_weight.topk(inter_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["decoder"][layer_num]["inter"] = inter_indexes_to_prune
+
+                    output_dim_to_prune = math.floor(prune_ratio * ffn_output_weight.size(0))
+                    output_indexes_to_prune = ffn_output_weight.topk(output_dim_to_prune, 
+                                                                   largest=False, 
+                                                                   sorted=False).indices.tolist()
+                    indexes_to_prune["decoder"][layer_num]["output"] = output_indexes_to_prune
+
+        return indexes_to_prune
+
     def prune_heads(self, heads_to_prune):
         encoder_heads_to_prune = heads_to_prune["encoder"]
         decoder_heads_to_prune = heads_to_prune["decoder"]
@@ -410,14 +546,13 @@ class PickyTransformer(modules.Module):
 
     def prune_dim(self, indexes):
         """
-            index: indexes of dimension to keep
+            index: indexes of dimension to prune
         """
         encoder_indexes = indexes["encoder"]
         decoder_indexes = indexes["decoder"]
 
-        if index_len:
-            self.encoder.prune_dim(index=encoder_indexes)
-            self.decoder.prune_dim(index=decoder_indexes)
+        self.encoder.prune_dim(indexes=encoder_indexes)
+        self.decoder.prune_dim(indexes=decoder_indexes)
 
     def summary_weights(self, summary, step, accumulate_steps=100):
         # summary mean in step interval
