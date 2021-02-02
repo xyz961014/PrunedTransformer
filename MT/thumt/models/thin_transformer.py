@@ -111,13 +111,13 @@ class ThinTransformerEncoderLayer(modules.Module):
     def __init__(self, params, name="layer"):
         super(ThinTransformerEncoderLayer, self).__init__(name=name)
 
-        self.skip_residule = params.skip_residule
+        self.skip_residual = params.skip_residual
 
         with utils.scope(name):
             self.self_attention = ThinAttentionSubLayer(params)
             self.feed_forward = ThinFFNSubLayer(params)
 
-            if params.skip_residule:
+            if params.skip_residual:
                 self.layer_norm = modules.LayerNorm(params.hidden_size)
 
 
@@ -125,7 +125,7 @@ class ThinTransformerEncoderLayer(modules.Module):
         y = self.self_attention(x, bias)
         y = self.feed_forward(y)
 
-        if self.skip_residule:
+        if self.skip_residual:
             return self.layer_norm(x + y)
         else:
             return y
@@ -137,7 +137,7 @@ class ThinTransformerDecoderLayer(modules.Module):
         super(ThinTransformerDecoderLayer, self).__init__(name=name)
 
         attention_hidden_size = params.num_heads * params.head_size
-        self.skip_residule = params.skip_residule
+        self.skip_residual = params.skip_residual
 
         with utils.scope(name):
             self.self_attention = ThinAttentionSubLayer(params,
@@ -152,7 +152,7 @@ class ThinTransformerDecoderLayer(modules.Module):
                                                           name="encdec_attention")
             self.feed_forward = ThinFFNSubLayer(params)
 
-            if params.skip_residule:
+            if params.skip_residual:
                 self.layer_norm = modules.LayerNorm(params.hidden_size)
 
 
@@ -162,7 +162,7 @@ class ThinTransformerDecoderLayer(modules.Module):
         y = self.encdec_attention(y, encdec_bias, memory)
         y = self.feed_forward(y)
 
-        if self.skip_residule:
+        if self.skip_residual:
             return self.layer_norm(x + y)
         else:
             return y
@@ -428,7 +428,7 @@ class ThinTransformer(modules.Module):
             residual_transform=True,
             outer_transform=True,
             output_transform=True,
-            skip_residule=False,
+            skip_residual=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
