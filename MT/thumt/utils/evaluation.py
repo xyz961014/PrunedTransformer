@@ -244,7 +244,11 @@ def evaluate(model, sorted_key, dataset, base_dir, references, params):
         print("BLEU at step %d: %f" % (global_step, score))
 
         # Save checkpoint to save_path
-        save({"model": model.state_dict(), "step": global_step}, save_path)
+        save({
+                "model": model.state_dict(), 
+                "step": global_step,
+                "pruned_heads": model.find_pruned_heads() if hasattr(model, "find_pruned_heads") else None
+             }, save_path)
 
         _save_log(log_name, ("BLEU", global_step, score))
         records = _read_score_record(record_name)

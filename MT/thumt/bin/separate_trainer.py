@@ -334,7 +334,8 @@ def save_checkpoint(step, additional_step, epoch, model, optimizer, params):
             "additional_step": additional_step,
             "epoch": epoch,
             "model": model.state_dict(),
-            "optimizer": optimizer.state_dict()
+            "optimizer": optimizer.state_dict(),
+            "pruned_heads": model.find_pruned_heads() if hasattr(model, "find_pruned_heads") else None
         }
         utils.save(state, params.output, params.keep_checkpoint_max)
 

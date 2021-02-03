@@ -23,6 +23,7 @@ class PickyAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.pruned_heads = 0
 
         with utils.scope(name):
             self.attention = modules.PickyMultiHeadAttention(params.hidden_size,
@@ -55,6 +56,7 @@ class PickyAttentionSubLayer(modules.Module):
         # Update hyper params
         self.attention.num_heads = self.attention.num_heads - len(heads)
         self.attention.attention_hidden_size = self.attention.head_size * self.attention.num_heads
+        self.pruned_heads += len(heads)
 
     def prune_dim(self, index):
         self.attention.prune_dim(index)
@@ -483,6 +485,17 @@ class PickyTransformer(modules.Module):
         if not self.params.shared_embedding_and_softmax_weights:
             nn.init.normal_(self.softmax_weights, mean=0.0,
                             std=self.params.hidden_size ** -0.5)
+
+    def find_pruned_heads(self):
+        heads_to_prune = {
+                "encoder": {i: list(range(layer.self_attention.pruned_heads)) 
+                            for i, layer in enumerate(self.encoder.layers)},
+                "decoder": {i: list(range(layer.self_attention.pruned_heads)) 
+                            for i, layer in enumerate(self.decoder.layers)},
+                "encdec": {i: list(range(layer.encdec_attention.pruned_heads)) 
+                            for i, layer in enumerate(self.decoder.layers)}
+                         }
+        return heads_to_prune
 
     def find_pruneable_heads(self, p):
         with torch.no_grad():
