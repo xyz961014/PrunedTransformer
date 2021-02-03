@@ -66,9 +66,9 @@ def parse_args(args=None):
     parser.add_argument("--weight_npy", type=str, default="",
                         help="npy file containing head weights")
     parser.add_argument("--dim_prune_prob", type=float, default=0.0,
-                        help="prune dims in FitTransformer")
+                        help="prune dims in FitTransformer or PickyTransformer")
     parser.add_argument("--dim_prune_interval", type=int, default=0,
-                        help="prune dims every N steps in FitTransformer"
+                        help="prune dims every N steps in FitTransformer or PickyTransformer"
                              " set to 0 to disable it")
 
     # model and configuration
@@ -633,13 +633,6 @@ def main(args):
 
     counter = 0
 
-    heads_to_prune = model.find_pruneable_heads(0.1)
-    indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
-    model.prune_heads(heads_to_prune)
-    model.prune_dim(indexes_to_prune)
-    import ipdb
-    ipdb.set_trace()
-
     while True:
         start_time = time.time()
 
@@ -706,20 +699,29 @@ def main(args):
                     return
 
                 if args.dim_prune_interval and step > 0 and step % args.dim_prune_interval == 0:
-                    index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
-                    if index_len:
-                        index = torch.ones(model.hidden_size).multinomial(index_len)
-                        index = index.sort()[0]
-                    model.prune_dim(index=index)
-                    optimizer.prune_dim(index, model.named_parameters())
-                    additional_optimizer.prune_dim(index, model.named_parameters())
-                    print("Model params after dim prune")
+                    if model.name == "fit_transformer":
+                        index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
+                        if index_len:
+                            index = torch.ones(model.hidden_size).multinomial(index_len)
+                            index = index.sort()[0]
+                        model.prune_dim(index=index)
+                        optimizer.prune_dim(index, model.named_parameters())
+                        additional_optimizer.prune_dim(index, model.named_parameters())
+                    elif model.name == "picky_transformer":
+                        heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                        indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                        optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        model.prune_heads(heads_to_prune)
+                        model.prune_dim(indexes_to_prune)
+                    print("Model params after prune")
                     print_variables(model, params.pattern, dist.get_rank() == 0)
 
 
                 if step % params.eval_steps == 0:
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
+
                     if args.display_weights:
                         model.display_weights(step)
                     start_time = time.time()

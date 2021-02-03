@@ -272,6 +272,138 @@ class AdamOptimizer(Optimizer):
                 self._slots[name]["m"] = var["m"].index_select(dim, index)
                 self._slots[name]["v"] = var["v"].index_select(dim, index)
 
+    def prune_heads_and_dims(self, heads_to_prune, indexes_to_prune, model):
+        
+        import ipdb
+        for name, var in self._slots.items():
+            if re.search("attention", name):
+                parse_name = name.split(".")
+                num_layer = int(parse_name[2])
+                if parse_name[-2] in ["q_transform", "k_transform", "v_transform", "o_transform"]:
+
+                    if parse_name[0] == "encoder":
+                        heads = heads_to_prune["encoder"][num_layer]
+                    elif parse_name[0] == "decoder":
+                        if parse_name[3] == "self_attention":
+                            heads = heads_to_prune["decoder"][num_layer]
+                        elif parse_name[3] == "encdec_attention":
+                            heads = heads_to_prune["encdec"][num_layer]
+
+                    if len(heads) > 0:
+                        layer = getattr(model, parse_name[0]).layers[num_layer]
+                        head_size = getattr(layer, parse_name[3]).attention.head_size
+                        num_heads = getattr(layer, parse_name[3]).attention.num_heads
+                        index = utils.find_pruneable_heads_indices(heads, num_heads, head_size)
+                        if parse_name[-2] in ["q_transform", "k_transform", "v_transform"]:
+                            if parse_name[-1] == "weight":
+                                self._slots[name]["m"] = var["m"].index_select(0, index)
+                                self._slots[name]["v"] = var["v"].index_select(0, index)
+                            elif parse_name[-1] == "bias":
+                                self._slots[name]["m"] = var["m"].index_select(0, index)
+                                self._slots[name]["v"] = var["v"].index_select(0, index)
+                        elif parse_name[-2] == "o_transform":
+                            if parse_name[-1] == "weight":
+                                self._slots[name]["m"] = var["m"].index_select(1, index)
+                                self._slots[name]["v"] = var["v"].index_select(1, index)
+                            elif parse_name[-1] == "bias":
+                                # no need to prune here
+                                pass
+
+                if parse_name[-2] in ["o_transform", "layer_norm", "residual_transform"]:
+                    index = indexes_to_prune[parse_name[0]][num_layer]
+                    if len(index["input"]) > 0 or len(index["inter"]) > 0 or len(index["output"]) > 0:
+                        if parse_name[0] == "decoder" and parse_name[3] == "self_attention":
+                            continue
+                        layer = getattr(model, parse_name[0]).layers[num_layer]
+                        if parse_name[-2] == "layer_norm" and getattr(layer, parse_name[3]).normalization == "before":
+                            continue
+                        input_size = getattr(layer, parse_name[3]).attention.o_transform.weight.size(0)
+                        input_index = utils.reverse_select(index["input"], input_size)
+                        index = torch.Tensor(input_index).to(var["m"]).long()
+
+                        self._slots[name]["m"] = var["m"].index_select(0, index)
+                        self._slots[name]["v"] = var["v"].index_select(0, index)
+
+            elif re.search("feed_forward", name):
+                parse_name = name.split(".")
+                num_layer = int(parse_name[2])
+                index = indexes_to_prune[parse_name[0]][num_layer]
+
+                if len(index["input"]) > 0 or len(index["inter"]) > 0 or len(index["output"]) > 0:
+                    feed_forward = getattr(model, parse_name[0]).layers[num_layer].feed_forward
+
+                    input_size = feed_forward.ffn_layer.input_transform.weight.size(1)
+                    inter_size = feed_forward.ffn_layer.input_transform.weight.size(0)
+                    output_size = feed_forward.ffn_layer.output_transform.weight.size(0)
+
+                    input_index = utils.reverse_select(index["input"], input_size)
+                    inter_index = utils.reverse_select(index["inter"], inter_size)
+                    output_index = utils.reverse_select(index["output"], output_size)
+
+                    input_index = torch.Tensor(input_index).to(var["m"]).long()
+                    inter_index = torch.Tensor(inter_index).to(var["m"]).long()
+                    output_index = torch.Tensor(output_index).to(var["m"]).long()
+
+                    if parse_name[-2] == "input_transform":
+                        if parse_name[-1] == "weight":
+                            var["m"] = var["m"].index_select(1, input_index)
+                            var["v"] = var["v"].index_select(1, input_index)
+                            self._slots[name]["m"] = var["m"].index_select(0, inter_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, inter_index)
+                        elif parse_name[-1] == "bias":
+                            self._slots[name]["m"] = var["m"].index_select(0, inter_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, inter_index)
+                    elif parse_name[-2] == "output_transform":
+                        if parse_name[-1] == "weight":
+                            var["m"] = var["m"].index_select(1, inter_index)
+                            var["v"] = var["v"].index_select(1, inter_index)
+                            self._slots[name]["m"] = var["m"].index_select(0, output_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, output_index)
+                        elif parse_name[-1] == "bias":
+                            self._slots[name]["m"] = var["m"].index_select(0, output_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, output_index)
+                    elif parse_name[-2] == "outer_transform":
+                        if parse_name[-1] == "weight":
+                            self._slots[name]["m"] = var["m"].index_select(1, output_index)
+                            self._slots[name]["v"] = var["v"].index_select(1, output_index)
+                        elif parse_name[-1] == "bias":
+                            # no need to prune here
+                            pass
+                    elif parse_name[-2] == "layer_norm":
+                        self._slots[name]["m"] = var["m"].index_select(0, output_index)
+                        self._slots[name]["v"] = var["v"].index_select(0, output_index)
+            elif re.search("kappa", name):
+                parse_name = name.split(".")
+                num_layer = int(parse_name[2])
+                if parse_name[0] == "encoder":
+                    heads = heads_to_prune["encoder"][num_layer]
+                elif parse_name[0] == "decoder":
+                    if parse_name[3] == "self_kappa":
+                        heads = heads_to_prune["decoder"][num_layer]
+                    elif parse_name[3] == "encdec_kappa":
+                        heads = heads_to_prune["encdec"][num_layer]
+                if len(heads) > 0:
+                    layer = getattr(model, parse_name[0]).layers[num_layer]
+                    index = utils.reverse_select(heads, getattr(layer, parse_name[3]).size(0))
+                    index = torch.Tensor(index).to(var["m"]).long()
+                    self._slots[name]["m"] = var["m"].index_select(0, index)
+                    self._slots[name]["v"] = var["v"].index_select(0, index)
+            elif re.search("ffn", name) and re.search("weight", name):
+                parse_name = name.split(".")
+                num_layer = int(parse_name[2])
+                index = indexes_to_prune[parse_name[0]][num_layer]
+                if len(index["input"]) > 0 or len(index["inter"]) > 0 or len(index["output"]) > 0:
+                    layer = getattr(model, parse_name[0]).layers[num_layer]
+                    if parse_name[-1] == "ffn_input_weight":
+                        index = utils.reverse_select(index["input"], layer.ffn_input_weight.size(0))
+                    elif parse_name[-1] == "ffn_inter_weight":
+                        index = utils.reverse_select(index["inter"], layer.ffn_inter_weight.size(0))
+                    elif parse_name[-1] == "ffn_output_weight":
+                        index = utils.reverse_select(index["output"], layer.ffn_output_weight.size(0))
+                    index = torch.Tensor(index).to(var["m"]).long()
+                    self._slots[name]["m"] = var["m"].index_select(0, index)
+                    self._slots[name]["v"] = var["v"].index_select(0, index)
+
 
     def load_state_dict(self, state):
         self._iterations = state.get("iterations", self._iterations)
@@ -505,6 +637,9 @@ class MultiStepOptimizer(Optimizer):
 
     def prune_dim(self, index, model_params):
         self._optimizer.prune_dim(index, model_params)
+
+    def prune_heads_and_dims(self, heads_to_prune, indexes_to_prune, model):
+        self._optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
 
     def state_dict(self):
         state = {

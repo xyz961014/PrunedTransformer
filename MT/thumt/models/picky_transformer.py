@@ -32,14 +32,18 @@ class PickyAttentionSubLayer(modules.Module):
                                                              params.weight_function)
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
-    def _prune_heads(self, heads, pruned_heads):
+            self.residual_transform = modules.Affine(params.hidden_size, params.hidden_size,
+                                                     name="residual_transform")
+
+        self.reset_parameters()
+
+    def _prune_heads(self, heads):
         if len(heads) == 0:
             return
-        heads, index = utils.find_pruneable_heads_and_indices(
+        index = utils.find_pruneable_heads_indices(
             heads, 
             self.attention.num_heads, 
             self.attention.head_size, 
-            pruned_heads
         )
 
         # Prune linear layers
@@ -50,12 +54,15 @@ class PickyAttentionSubLayer(modules.Module):
 
         # Update hyper params
         self.attention.num_heads = self.attention.num_heads - len(heads)
-        self.attention.hidden_size = self.attention.head_size * self.attention.num_heads
+        self.attention.attention_hidden_size = self.attention.head_size * self.attention.num_heads
 
     def prune_dim(self, index):
         self.attention.prune_dim(index)
+
+        output_dim_to_reserve = utils.reverse_select(index["input"], self.residual_transform.weight.size(0))
+        self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve)
         if not self.normalization == "before":
-            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+            self.layer_norm.prune_dim(output_dim_to_reserve)
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -79,9 +86,13 @@ class PickyAttentionSubLayer(modules.Module):
         y = nn.functional.dropout(y, self.dropout, self.training)
 
         if self.normalization == "before":
-            return x + y
+            return self.residual_transform(x) + y
         else:
-            return self.layer_norm(x + y)
+            return self.layer_norm(self.residual_transform(x) + y)
+
+    def reset_parameters(self):
+        nn.init.eye_(self.residual_transform.weight)
+        nn.init.constant_(self.residual_transform.bias, 0.0)
 
 
 class PickyFFNSubLayer(modules.Module):
@@ -99,9 +110,17 @@ class PickyFFNSubLayer(modules.Module):
                                                       weight_function=params.weight_function)
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
+            self.outer_transform = modules.Affine(params.hidden_size, params.hidden_size,
+                                                  name="outer_transform")
+
+        self.reset_parameters()
+
     def prune_dim(self, index):
         self.ffn_layer.prune_dim(index)
-        self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+
+        output_dim_to_reserve = utils.reverse_select(index["output"], self.outer_transform.weight.size(1))
+        self.outer_transform = prune_linear_layer(self.outer_transform, output_dim_to_reserve, dim=1)
+        self.layer_norm.prune_dim(output_dim_to_reserve)
 
     def forward(self, x):
         if self.normalization == "before":
@@ -113,9 +132,13 @@ class PickyFFNSubLayer(modules.Module):
         y = nn.functional.dropout(y, self.dropout, self.training)
 
         if self.normalization == "before":
-            return x + y
+            return self.outer_transform(x + y)
         else:
-            return self.layer_norm(x + y)
+            return self.outer_transform(self.layer_norm(x + y))
+
+    def reset_parameters(self):
+        nn.init.eye_(self.outer_transform.weight)
+        nn.init.constant_(self.outer_transform.bias, 0.0)
 
 
 class PickyTransformerEncoderLayer(modules.Module):
@@ -136,16 +159,15 @@ class PickyTransformerEncoderLayer(modules.Module):
 
             # weight for ffn hidden
             self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
-            self.add_name(self.ffn_input_weight, "ffn_input_weight")
-            self.additional_params.append(self.ffn_input_weight)
             self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
-            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
-            self.additional_params.append(self.ffn_inter_weight)
             self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+            self.add_name(self.ffn_input_weight, "ffn_input_weight")
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
             self.add_name(self.ffn_output_weight, "ffn_output_weight")
+            self.additional_params.append(self.ffn_input_weight)
+            self.additional_params.append(self.ffn_inter_weight)
             self.additional_params.append(self.ffn_output_weight)
 
-        self.pruned_heads = set()
         nn.init.constant_(self.kappa, 0.0)
         nn.init.constant_(self.ffn_input_weight, 0.0)
     
@@ -160,11 +182,11 @@ class PickyTransformerEncoderLayer(modules.Module):
 
     def prune_heads(self, heads):
         if len(heads) > 0:
-            self.self_attention._prune_heads(heads, self.pruned_heads)
-            self.pruned_heads = self.pruned_heads.union(heads)
+            self.self_attention._prune_heads(heads)
             
             remain_heads = utils.reverse_select(heads, self.kappa.size(0))
             self.kappa = prune_vector(self.kappa, remain_heads, scale=False)
+            self.add_name(self.kappa, "kappa")
 
     def prune_dim(self, index):
         if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
@@ -179,6 +201,10 @@ class PickyTransformerEncoderLayer(modules.Module):
         self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
         self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
         self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
+
+        self.add_name(self.ffn_input_weight, "ffn_input_weight")
+        self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+        self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
     def forward(self, x, bias):
         self.load_additional_params()
@@ -211,17 +237,15 @@ class PickyTransformerDecoderLayer(modules.Module):
 
             # weight for ffn hidden
             self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
-            self.add_name(self.ffn_input_weight, "ffn_input_weight")
-            self.additional_params.append(self.ffn_input_weight)
             self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
-            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
-            self.additional_params.append(self.ffn_inter_weight)
             self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+            self.add_name(self.ffn_input_weight, "ffn_input_weight")
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
             self.add_name(self.ffn_output_weight, "ffn_output_weight")
+            self.additional_params.append(self.ffn_input_weight)
+            self.additional_params.append(self.ffn_inter_weight)
             self.additional_params.append(self.ffn_output_weight)
 
-        self.self_pruned_heads = set()
-        self.encdec_pruned_heads = set()
         nn.init.constant_(self.self_kappa, 0.0)
         nn.init.constant_(self.encdec_kappa, 0.0)
         nn.init.constant_(self.ffn_input_weight, 0.0)
@@ -239,17 +263,38 @@ class PickyTransformerDecoderLayer(modules.Module):
         self.feed_forward.ffn_layer.additional_params = encdec_additional_params_dict
 
     def self_prune_heads(self, heads):
-        self.self_attention._prune_heads(heads, self.self_pruned_heads)
-        self.self_pruned_heads = self.self_pruned_heads.union(heads)
+        if len(heads) > 0:
+            self.self_attention._prune_heads(heads)
+            
+            remain_heads = utils.reverse_select(heads, self.self_kappa.size(0))
+            self.self_kappa = prune_vector(self.self_kappa, remain_heads, scale=False)
+            self.add_name(self.self_kappa, "self_kappa")
 
     def encdec_prune_heads(self, heads):
-        self.encdec_attention._prune_heads(heads, self.encdec_pruned_heads)
-        self.encdec_pruned_heads = self.encdec_pruned_heads.union(heads)
+        if len(heads) > 0:
+            self.encdec_attention._prune_heads(heads)
+            
+            remain_heads = utils.reverse_select(heads, self.encdec_kappa.size(0))
+            self.encdec_kappa = prune_vector(self.encdec_kappa, remain_heads, scale=False)
+            self.add_name(self.encdec_kappa, "encdec_kappa")
 
     def prune_dim(self, index):
-        #self.self_attention.prune_dim(index)
+        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
+            return
         self.encdec_attention.prune_dim(index)
         self.feed_forward.prune_dim(index)
+
+        input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+        inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+        output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+
+        self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+        self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
+        self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
+
+        self.add_name(self.ffn_input_weight, "ffn_input_weight")
+        self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+        self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         self.load_additional_params()
@@ -358,7 +403,7 @@ class PickyTransformerDecoder(modules.Module):
 
 class PickyTransformer(modules.Module):
 
-    def __init__(self, params, name="transformer"):
+    def __init__(self, params, name="picky_transformer"):
         super(PickyTransformer, self).__init__(name=name)
         self.params = params
 
@@ -444,10 +489,9 @@ class PickyTransformer(modules.Module):
                     "decoder": {layer: [] for layer, _ in enumerate(self.decoder.layers)},
                     "encdec": {layer: [] for layer, _ in enumerate(self.decoder.layers)}
                              }
-            #TODO:delete normal_
-            encoder_kappa = torch.cat([layer.kappa.normal_() for layer in self.encoder.layers])
-            decoder_kappa = torch.cat([layer.self_kappa.normal_() for layer in self.decoder.layers])
-            encdec_kappa = torch.cat([layer.encdec_kappa.normal_() for layer in self.decoder.layers])
+            encoder_kappa = torch.cat([layer.kappa for layer in self.encoder.layers])
+            decoder_kappa = torch.cat([layer.self_kappa for layer in self.decoder.layers])
+            encdec_kappa = torch.cat([layer.encdec_kappa for layer in self.decoder.layers])
             all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
 
             num_heads_to_prune = math.floor(p * all_kappa.size(0))

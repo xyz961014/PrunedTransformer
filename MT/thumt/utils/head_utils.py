@@ -160,6 +160,14 @@ def find_pruneable_heads_and_indices(
     index: torch.LongTensor = torch.arange(len(mask))[mask].long()
     return heads, index
 
+def find_pruneable_heads_indices(heads_to_prune, num_heads, head_size):
+    mask = torch.ones(num_heads, head_size)
+    for head in heads_to_prune:
+        mask[head] = 0
+    mask = mask.view(-1).contiguous().eq(1)
+    index = torch.arange(len(mask))[mask].long()
+    return index
+
 
 def eval_loss(model, dataset, params):
     total_loss = 0.
