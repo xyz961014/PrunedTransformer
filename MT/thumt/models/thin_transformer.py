@@ -20,6 +20,7 @@ class ThinAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.residual = params.attention_residual
 
         attention_hidden_size = params.num_heads * params.head_size
 
@@ -54,10 +55,16 @@ class ThinAttentionSubLayer(modules.Module):
 
         y = nn.functional.dropout(y, self.dropout, self.training)
 
-        if self.normalization == "before":
-            return self.residual_transform(x) + y
+        if self.residual:
+            if self.normalization == "before":
+                return self.residual_transform(x) + y
+            else:
+                return self.layer_norm(self.residual_transform(x) + y)
         else:
-            return self.layer_norm(self.residual_transform(x) + y)
+            if self.normalization == "before":
+                return y
+            else:
+                return self.layer_norm(y)
 
     def reset_parameters(self):
         nn.init.eye_(self.residual_transform.weight)
@@ -71,15 +78,24 @@ class ThinFFNSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.thin_output = params.thin_ffn_output
 
         ffn_hidden_size = params.num_heads * params.head_size
         ffn_filter_size = ffn_hidden_size * 4
+        if self.thin_output:
+            ffn_output_size = ffn_hidden_size
+        else:
+            ffn_output_size = params.hidden_size
 
         with utils.scope(name):
             self.ffn_layer = modules.FeedForward(ffn_hidden_size,
                                                  ffn_filter_size,
+                                                 ffn_output_size,
                                                  dropout=params.relu_dropout)
-            self.layer_norm = modules.LayerNorm(ffn_hidden_size)
+            if self.thin_output or self.normalization == "before":
+                self.layer_norm = modules.LayerNorm(ffn_hidden_size)
+            else:
+                self.layer_norm = modules.LayerNorm(params.hidden_size)
             if params.outer_transform:
                 self.outer_transform = modules.Affine(ffn_hidden_size, params.hidden_size,
                                                        name="outer_transform")
@@ -96,10 +112,16 @@ class ThinFFNSubLayer(modules.Module):
         y = self.ffn_layer(y)
         y = nn.functional.dropout(y, self.dropout, self.training)
 
-        if self.normalization == "before":
-            return self.outer_transform(x + y)
+        if self.thin_output:
+            if self.normalization == "before":
+                return self.outer_transform(x + y)
+            else:
+                return self.outer_transform(self.layer_norm(x + y))
         else:
-            return self.outer_transform(self.layer_norm(x + y))
+            if self.normalization == "before":
+                return y
+            else:
+                return self.layer_norm(y)
 
     def reset_parameters(self):
         nn.init.eye_(self.outer_transform.weight)
@@ -429,6 +451,8 @@ class ThinTransformer(modules.Module):
             outer_transform=True,
             output_transform=True,
             skip_residual=False,
+            attention_residual=True,
+            thin_ffn_output=True, # will disable ffn residual
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
