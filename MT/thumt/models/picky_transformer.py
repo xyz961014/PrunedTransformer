@@ -65,16 +65,13 @@ class PickyAttentionSubLayer(modules.Module):
             self.layer_norm.prune_dim(output_dim_to_reserve)
 
     def forward(self, x, bias, memory=None, state=None):
+        if self.attention.num_heads == 0:
+            return x
+
         if self.normalization == "before":
             y = self.layer_norm(x)
         else:
             y = x
-
-        if self.attention.num_heads == 0:
-            if self.normalization == "before":
-                return x
-            else:
-                return self.layer_norm(x)
 
         if self.training or state is None:
             y = self.attention(y, bias, memory, None)
@@ -102,6 +99,7 @@ class PickyFFNSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.hidden_size = params.hidden_size
 
         with utils.scope(name):
             self.ffn_layer = modules.PickyFeedForward(params.hidden_size,
@@ -121,8 +119,12 @@ class PickyFFNSubLayer(modules.Module):
         output_dim_to_reserve = utils.reverse_select(index["output"], self.outer_transform.weight.size(1))
         self.outer_transform = prune_linear_layer(self.outer_transform, output_dim_to_reserve, dim=1)
         self.layer_norm.prune_dim(output_dim_to_reserve)
+        self.hidden_size = len(output_dim_to_reserve)
 
     def forward(self, x):
+        if self.hidden_size == 0:
+            return x
+
         if self.normalization == "before":
             y = self.layer_norm(x)
         else:
@@ -558,7 +560,7 @@ class PickyTransformer(modules.Module):
                     ffn_inter_weight = layer.ffn_inter_weight
                     ffn_output_weight = layer.ffn_output_weight
 
-                    prune_ratio = len(heads) / layer.self_attention.attention.num_heads
+                    prune_ratio = len(heads) / layer.encdec_attention.attention.num_heads
                     
                     input_dim_to_prune = math.floor(prune_ratio * ffn_input_weight.size(0))
                     input_indexes_to_prune = ffn_input_weight.topk(input_dim_to_prune, 

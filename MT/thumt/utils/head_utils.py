@@ -54,7 +54,7 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0, scale: bool
         index = torch.Tensor(index).long()
     index = index.to(layer.weight.device)
     W = layer.weight.index_select(dim, index).clone().detach()
-    if scale:
+    if scale and index.size(0):
         scale = layer.weight.size(dim) / index.size(0)
         W.mul_(scale)
     if layer.bias is not None:
@@ -62,7 +62,7 @@ def prune_linear_layer(layer, index: torch.LongTensor, dim: int = 0, scale: bool
             b = layer.bias.clone().detach()
         else:
             b = layer.bias.index_select(dim, index).clone().detach()
-            if scale:
+            if scale and index.size(0):
                 scale = layer.bias.size(dim) / index.size(0)
                 b.mul_(scale)
     new_size = list(layer.weight.size())
