@@ -17,6 +17,7 @@
 
 import logging
 import os
+import re
 import random
 import sys
 from dataclasses import dataclass, field
@@ -29,8 +30,9 @@ from datasets import load_dataset, load_metric
 
 import transformers
 from transformers import (
-    BertConfig,
-    BertTokenizer,
+    AutoConfig,
+    AutoTokenizer,
+    AutoModel,
     EvalPrediction,
     HfArgumentParser,
     PretrainedConfig,
@@ -41,7 +43,6 @@ from transformers import (
 )
 
 from transformers.trainer_utils import is_main_process
-from modeling_bert import BertModel
 from utils import add_attr_from_dict
 
 task_to_keys = {
@@ -136,7 +137,11 @@ class ModelArguments:
     )
     model: str = field(
         default="transformer",
-        metadata={"help": "What model to apply in BertModel. Choices: transformer, weighted_transformer"},
+        metadata={"help": "What model to apply in AutoModel. Choices: transformer, weighted_transformer"},
+    )
+    sentence_path: str = field(
+        default="",
+        metadata={"help": "file path of created sentences"},
     )
 
 def main():
@@ -237,19 +242,19 @@ def main():
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    config = BertConfig.from_pretrained(
+    config = AutoConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
     config = add_attr_from_dict(config, model_args.__dict__)
-    tokenizer = BertTokenizer.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         use_fast=model_args.use_fast_tokenizer,
     )
-    model = BertModel.from_pretrained(
+    model = AutoModel.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
@@ -378,18 +383,24 @@ def main():
         model.eval()
         with torch.no_grad():
             sentence_reprs = []
-            for idx, inputs in enumerate(tqdm(trainer.get_eval_dataloader(train_dataset))):
-                inputs.pop("labels")
+            sentence_path = os.path.abspath(model_args.sentence_path)
+            f_my_sent = open(sentence_path, "r")
+            #for idx, inputs in enumerate(tqdm(trainer.get_eval_dataloader(eval_dataset))):
+            #    inputs.pop("labels")
+            for sent in f_my_sent:
+                sent = re.sub("\n", "", sent)
+                inputs = tokenizer(sent, return_tensors="pt", padding="max_length", max_length=64)
                 inputs = trainer._prepare_inputs(inputs)
                 outputs = model(**inputs)
                 last_hidden_state = outputs["last_hidden_state"]
                 input_ids, mask = inputs["input_ids"], inputs["attention_mask"]
                 eos = mask.sum().item() - 2
-                sentence = " ".join(tokenizer.convert_ids_to_tokens(input_ids.reshape(-1).narrow(0, 1, eos)))
+                sentence = tokenizer.decode(input_ids.reshape(-1).narrow(0, 1, eos))
                 mean_repr = last_hidden_state.narrow(1, 1, eos).mean(dim=1).squeeze(0)
                 sentence_repr = {
                         "sentence": sentence,
-                        "repr": mean_repr
+                        "mean_repr": mean_repr,
+                        "cls_repr": last_hidden_state.squeeze(0)[0]
                                 }
                 sentence_reprs.append(sentence_repr)
             torch.save(sentence_reprs, "bert_sentence_reprs.pt")

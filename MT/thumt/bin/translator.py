@@ -204,11 +204,12 @@ def main(args):
                 model = model.half()
 
             checkpoint = torch.load(utils.latest_checkpoint(args.checkpoints[i]), map_location="cpu")
-            if checkpoint["pruned_heads"] is not None and model.name == "picky_transformer":
-                heads_to_prune = checkpoint["pruned_heads"]
-                indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
-                model.prune_heads(heads_to_prune)
-                model.prune_dim(indexes_to_prune)
+            if "pruned_heads" in checkpoint.keys():
+                if checkpoint["pruned_heads"] is not None and model.name == "picky_transformer":
+                    heads_to_prune = checkpoint["pruned_heads"]
+                    indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                    model.prune_heads(heads_to_prune)
+                    model.prune_dim(indexes_to_prune)
 
             model.eval()
             model.load_state_dict(checkpoint["model"])
