@@ -258,20 +258,24 @@ class PickyFeedForward(Module):
 
         self.reset_parameters()
 
-    def prune_dim(self, index):
+    def prune_dim(self, index, prune_output=True):
         if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
             return
         input_index = utils.reverse_select(index["input"], self.input_transform.weight.size(1))
         inter_index = utils.reverse_select(index["inter"], self.input_transform.weight.size(0))
-        output_index = utils.reverse_select(index["output"], self.output_transform.weight.size(0))
         self.input_transform = utils.prune_linear_layer(self.input_transform, input_index, dim=1, scale=True)
         self.input_transform = utils.prune_linear_layer(self.input_transform, inter_index, dim=0, scale=True)
-        self.output_transform = utils.prune_linear_layer(self.output_transform, output_index, dim=0, scale=True)
         self.output_transform = utils.prune_linear_layer(self.output_transform, inter_index, dim=1, scale=True)
 
         self.input_size = len(input_index)
         self.hidden_size = len(inter_index)
-        self.output_size = len(output_index)
+
+        if prune_output:
+            output_index = utils.reverse_select(index["output"], self.output_transform.weight.size(0))
+            self.output_transform = utils.prune_linear_layer(self.output_transform, output_index, dim=0, scale=True)
+
+            self.output_size = len(output_index)
+
 
     def forward(self, x):
         # apply soft weights
@@ -284,8 +288,9 @@ class PickyFeedForward(Module):
         h = F.dropout(h, self.dropout, self.training)
 
         h = self.output_transform(h)
-        output_weight = self.compute_weight(self.additional_params["ffn_output_weight"])
-        h = torch.einsum("d,bld->bld", output_weight, h)
+        if "ffn_output_weight" in self.additional_params.keys():
+            output_weight = self.compute_weight(self.additional_params["ffn_output_weight"])
+            h = torch.einsum("d,bld->bld", output_weight, h)
 
         return h
 
