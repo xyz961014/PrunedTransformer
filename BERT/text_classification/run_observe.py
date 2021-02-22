@@ -43,6 +43,7 @@ from transformers import (
 )
 
 from transformers.trainer_utils import is_main_process
+from modeling_bert import BertModel
 from utils import add_attr_from_dict
 
 task_to_keys = {
@@ -254,7 +255,7 @@ def main():
         cache_dir=model_args.cache_dir,
         use_fast=model_args.use_fast_tokenizer,
     )
-    model = AutoModel.from_pretrained(
+    model = BertModel.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,

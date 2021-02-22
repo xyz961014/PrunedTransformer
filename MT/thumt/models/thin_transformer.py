@@ -38,7 +38,10 @@ class ThinAttentionSubLayer(modules.Module):
                                                          name="residual_transform")
                 self.reset_parameters()
             else:
-                self.residual_transform = lambda x: x
+                if params.hidden_size % attention_hidden_size == 0:
+                    self.residual_transform = lambda x: x.reshape(*x.size()[:2], attention_hidden_size, -1).sum(-1)
+                else:
+                    raise ValueError("size not match for unparameterized residual")
 
     def forward(self, x, bias, memory=None, state=None):
         if self.normalization == "before":
@@ -101,7 +104,12 @@ class ThinFFNSubLayer(modules.Module):
                                                        name="outer_transform")
                 self.reset_parameters()
             else:
-                self.outer_transform = lambda x: x
+                if params.hidden_size % ffn_hidden_size == 0:
+                    fold_num = params.hidden_size // ffn_hidden_size
+                    self.outer_transform = lambda x: \
+                        x.unsqueeze(-1).expand(-1, -1, -1, fold_num).reshape(*x.size()[:2], params.hidden_size)
+                else:
+                    raise ValueError("size not match for unparameterized residual")
 
     def forward(self, x):
         if self.normalization == "before":
