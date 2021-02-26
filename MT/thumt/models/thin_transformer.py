@@ -39,7 +39,7 @@ class ThinAttentionSubLayer(modules.Module):
                 self.reset_parameters()
             else:
                 if params.hidden_size % attention_hidden_size == 0:
-                    self.residual_transform = lambda x: x.reshape(*x.size()[:2], attention_hidden_size, -1).sum(-1)
+                    self.residual_transform = lambda x: x.reshape(*x.size()[:2], attention_hidden_size, -1).mean(-1)
                 else:
                     raise ValueError("size not match for unparameterized residual")
 
