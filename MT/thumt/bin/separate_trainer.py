@@ -588,7 +588,15 @@ def main(args):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
-            model.prune_dim(p=args.dim_prune_prob)
+            if model.name == "fit_transformer":
+                model.prune_dim(p=args.dim_prune_prob)
+            elif model.name == "picky_transformer":
+                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                model.prune_heads(heads_to_prune)
+                model.prune_dim(indexes_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -606,7 +614,15 @@ def main(args):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
-            model.prune_dim(p=args.dim_prune_prob)
+            if model.name == "fit_transformer":
+                model.prune_dim(p=args.dim_prune_prob)
+            elif model.name == "picky_transformer":
+                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                model.prune_heads(heads_to_prune)
+                model.prune_dim(indexes_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -621,7 +637,15 @@ def main(args):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
         if args.dim_prune_prob and not args.dim_prune_interval:
-            model.prune_dim(p=args.dim_prune_prob)
+            if model.name == "fit_transformer":
+                model.prune_dim(p=args.dim_prune_prob)
+            elif model.name == "picky_transformer":
+                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                model.prune_heads(heads_to_prune)
+                model.prune_dim(indexes_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
