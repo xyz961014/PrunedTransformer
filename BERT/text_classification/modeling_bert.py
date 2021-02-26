@@ -371,9 +371,16 @@ class BertAttention(nn.Module):
             encoder_attention_mask,
             output_attentions,
         )
+        headwise_outputs = torch.einsum("blnh,dnh->blnd", 
+                                         self_outputs[0].reshape(*self_outputs[0].size()[:2],
+                                                                 self.self.num_attention_heads,
+                                                                 self.self.attention_head_size), 
+                                         self.output.dense.weight.reshape(self.self.all_head_size,
+                                                                          self.self.num_attention_heads,
+                                                                          self.self.attention_head_size))
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
-        return outputs
+        return outputs, headwise_outputs
 
 
 class WeightedBertAttention(nn.Module):
@@ -541,7 +548,7 @@ class BertLayer(nn.Module):
         encoder_attention_mask=None,
         output_attentions=False,
     ):
-        self_attention_outputs = self.attention(
+        self_attention_outputs, headwise_outputs = self.attention(
             hidden_states,
             attention_mask,
             head_mask,
@@ -569,7 +576,7 @@ class BertLayer(nn.Module):
             self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
         )
         outputs = (layer_output,) + outputs
-        return outputs
+        return outputs, headwise_outputs
 
     def feed_forward_chunk(self, attention_output):
         intermediate_output = self.intermediate(attention_output)
@@ -656,6 +663,7 @@ class BertEncoder(nn.Module):
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
+        headwise_outputs_list = []
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -670,7 +678,7 @@ class BertEncoder(nn.Module):
 
                     return custom_forward
 
-                layer_outputs = torch.utils.checkpoint.checkpoint(
+                layer_outputs, headwise_outputs = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,
@@ -679,7 +687,7 @@ class BertEncoder(nn.Module):
                     encoder_attention_mask,
                 )
             else:
-                layer_outputs = layer_module(
+                layer_outputs, headwise_outputs = layer_module(
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -688,6 +696,7 @@ class BertEncoder(nn.Module):
                     output_attentions,
                 )
             hidden_states = layer_outputs[0]
+            headwise_outputs_list.append(headwise_outputs)
             if output_attentions:
                 all_self_attentions = all_self_attentions + (layer_outputs[1],)
                 if self.config.add_cross_attention:
@@ -707,7 +716,7 @@ class BertEncoder(nn.Module):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
-        )
+        ), headwise_outputs_list
 
 class WeightedBertEncoder(nn.Module):
     def __init__(self, config):
@@ -1115,7 +1124,7 @@ class BertModel(BertPreTrainedModel):
         embedding_output = self.embeddings(
             input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
-        encoder_outputs = self.encoder(
+        encoder_outputs, headwise_outputs_list = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
             head_mask=head_mask,
@@ -1137,7 +1146,7 @@ class BertModel(BertPreTrainedModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
             cross_attentions=encoder_outputs.cross_attentions,
-        )
+        ), headwise_outputs_list
 
 @add_start_docstrings(
     "The weighted Bert Model transformer adding learnable parameters upon branch of attention heads and MLPs.",

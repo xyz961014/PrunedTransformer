@@ -23,6 +23,7 @@ class PickyAttentionSubLayer(modules.Module):
 
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
+        self.has_residual_transform = params.residual_transform
         self.pruned_heads = 0
 
         with utils.scope(name):
@@ -33,10 +34,12 @@ class PickyAttentionSubLayer(modules.Module):
                                                              params.weight_function)
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
-            self.residual_transform = modules.Affine(params.hidden_size, params.hidden_size,
-                                                     name="residual_transform")
-
-        self.reset_parameters()
+            if self.has_residual_transform:
+                self.residual_transform = modules.Affine(params.hidden_size, params.hidden_size,
+                                                         name="residual_transform")
+                self.reset_parameters()
+            else:
+                self.residual_transform = lambda x: x
 
     def _prune_heads(self, heads):
         if len(heads) == 0:
@@ -61,10 +64,11 @@ class PickyAttentionSubLayer(modules.Module):
     def prune_dim(self, index):
         self.attention.prune_dim(index)
 
-        output_dim_to_reserve = utils.reverse_select(index["input"], self.residual_transform.weight.size(0))
-        self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve)
-        if not self.normalization == "before":
-            self.layer_norm.prune_dim(output_dim_to_reserve)
+        if self.has_residual_transform:
+            output_dim_to_reserve = utils.reverse_select(index["input"], self.residual_transform.weight.size(0))
+            self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve)
+            if not self.normalization == "before":
+                self.layer_norm.prune_dim(output_dim_to_reserve)
 
     def forward(self, x, bias, memory=None, state=None):
         if self.attention.num_heads == 0:
@@ -104,6 +108,7 @@ class PickyFFNSubLayer(modules.Module):
         self.input_hidden_size = params.hidden_size
         self.output_hidden_size = params.hidden_size
         self.thin_output = params.ffn_thin_output
+        self.has_outer_transform = params.outer_transform
 
         with utils.scope(name):
             self.ffn_layer = modules.PickyFeedForward(params.hidden_size,
@@ -113,20 +118,23 @@ class PickyFFNSubLayer(modules.Module):
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
             if self.thin_output:
-                self.outer_transform = modules.Affine(params.hidden_size, params.hidden_size,
-                                                      name="outer_transform")
-
-                self.reset_parameters()
+                if self.has_outer_transform:
+                    self.outer_transform = modules.Affine(params.hidden_size, params.hidden_size,
+                                                          name="outer_transform")
+                    self.reset_parameters()
+                else:
+                    self.outer_transform = lambda x: x
 
     def prune_dim(self, index):
         self.ffn_layer.prune_dim(index, prune_output=self.thin_output)
         self.input_hidden_size = self.input_hidden_size - len(index["input"])
 
         if self.thin_output:
-            output_dim_to_reserve = utils.reverse_select(index["output"], self.outer_transform.weight.size(1))
-            self.outer_transform = prune_linear_layer(self.outer_transform, output_dim_to_reserve, dim=1)
-            self.layer_norm.prune_dim(output_dim_to_reserve)
-            self.output_hidden_size = len(output_dim_to_reserve)
+            if self.has_outer_transform:
+                output_dim_to_reserve = utils.reverse_select(index["output"], self.outer_transform.weight.size(1))
+                self.outer_transform = prune_linear_layer(self.outer_transform, output_dim_to_reserve, dim=1)
+                self.layer_norm.prune_dim(output_dim_to_reserve)
+                self.output_hidden_size = len(output_dim_to_reserve)
 
     def forward(self, x):
         if self.input_hidden_size == 0:
@@ -817,6 +825,8 @@ class PickyTransformer(modules.Module):
             weight_function="sigmoid",
             ffn_thin_output=False, # will disable residual when set to False
             skip_residual=True,
+            residual_transform=True,
+            outer_transform=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
