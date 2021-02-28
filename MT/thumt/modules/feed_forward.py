@@ -279,12 +279,14 @@ class PickyFeedForward(Module):
 
     def forward(self, x):
         # apply soft weights
-        input_weight = self.compute_weight(self.additional_params["ffn_input_weight"])
-        x = torch.einsum("d,bld->bld", input_weight, x)
+        if "ffn_input_weight" in self.additional_params.keys():
+            input_weight = self.compute_weight(self.additional_params["ffn_input_weight"])
+            x = torch.einsum("d,bld->bld", input_weight, x)
 
         h = F.relu(self.input_transform(x))
-        inter_weight = self.compute_weight(self.additional_params["ffn_inter_weight"])
-        h = torch.einsum("d,bld->bld", inter_weight, h)
+        if "ffn_inter_weight" in self.additional_params.keys():
+            inter_weight = self.compute_weight(self.additional_params["ffn_inter_weight"])
+            h = torch.einsum("d,bld->bld", inter_weight, h)
         h = F.dropout(h, self.dropout, self.training)
 
         h = self.output_transform(h)

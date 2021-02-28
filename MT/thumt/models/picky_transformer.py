@@ -171,6 +171,7 @@ class PickyTransformerEncoderLayer(modules.Module):
 
         self.additional_params = []
         self.skip_residual = params.skip_residual
+        self.ffn_weights = params.ffn_weights
 
         with utils.scope(name):
             self.self_attention = PickyAttentionSubLayer(params)
@@ -185,30 +186,32 @@ class PickyTransformerEncoderLayer(modules.Module):
             self.additional_params.append(self.kappa)
 
             # weight for ffn hidden
-            self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
-            self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
-            self.add_name(self.ffn_input_weight, "ffn_input_weight")
-            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
-            self.additional_params.append(self.ffn_input_weight)
-            self.additional_params.append(self.ffn_inter_weight)
-            if params.ffn_thin_output:
-                self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
-                self.add_name(self.ffn_output_weight, "ffn_output_weight")
-                self.additional_params.append(self.ffn_output_weight)
+            if self.ffn_weights:
+                self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
+                self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
+                self.add_name(self.ffn_input_weight, "ffn_input_weight")
+                self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+                self.additional_params.append(self.ffn_input_weight)
+                self.additional_params.append(self.ffn_inter_weight)
+                if params.ffn_thin_output:
+                    self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+                    self.add_name(self.ffn_output_weight, "ffn_output_weight")
+                    self.additional_params.append(self.ffn_output_weight)
+                nn.init.constant_(self.ffn_input_weight, 0.0)
+                nn.init.constant_(self.ffn_inter_weight, 0.0)
+                if params.ffn_thin_output:
+                    nn.init.constant_(self.ffn_output_weight, 0.0)
 
         nn.init.constant_(self.kappa, 0.0)
-        nn.init.constant_(self.ffn_input_weight, 0.0)
-        nn.init.constant_(self.ffn_inter_weight, 0.0)
-        if params.ffn_thin_output:
-            nn.init.constant_(self.ffn_output_weight, 0.0)
     
     def load_additional_params(self):
         additional_params_dict = dict()
         additional_params_dict["kappa"] = self.kappa
-        additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
-        additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
-        if self.feed_forward.thin_output:
-            additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
+        if self.ffn_weights:
+            additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
+            additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
+            if self.feed_forward.thin_output:
+                additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
         self.self_attention.attention.additional_params = additional_params_dict
         self.feed_forward.ffn_layer.additional_params = additional_params_dict
 
@@ -225,19 +228,20 @@ class PickyTransformerEncoderLayer(modules.Module):
             return
         self.self_attention.prune_dim(index)
         self.feed_forward.prune_dim(index)
+        
+        if self.ffn_weights:
+            input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+            inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
 
-        input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
-        inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
+            if self.feed_forward.thin_output:
+                output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
+                self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
-        self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
-        self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
-        if self.feed_forward.thin_output:
-            output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
-            self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
-            self.add_name(self.ffn_output_weight, "ffn_output_weight")
-
-        self.add_name(self.ffn_input_weight, "ffn_input_weight")
-        self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+            self.add_name(self.ffn_input_weight, "ffn_input_weight")
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
     def forward(self, x, bias):
         self.load_additional_params()
@@ -256,6 +260,7 @@ class PickyTransformerDecoderLayer(modules.Module):
 
         self.additional_params = []
         self.skip_residual = params.skip_residual
+        self.ffn_weights = params.ffn_weights
 
         with utils.scope(name):
             self.self_attention = PickyAttentionSubLayer(params,
@@ -276,33 +281,35 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.additional_params.append(self.encdec_kappa)
 
             # weight for ffn hidden
-            self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
-            self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
-            self.add_name(self.ffn_input_weight, "ffn_input_weight")
-            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
-            self.additional_params.append(self.ffn_input_weight)
-            self.additional_params.append(self.ffn_inter_weight)
-            if params.ffn_thin_output:
-                self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
-                self.add_name(self.ffn_output_weight, "ffn_output_weight")
-                self.additional_params.append(self.ffn_output_weight)
+            if self.ffn_weights:
+                self.ffn_input_weight = nn.Parameter(torch.empty(params.hidden_size))
+                self.ffn_inter_weight = nn.Parameter(torch.empty(params.filter_size))
+                self.add_name(self.ffn_input_weight, "ffn_input_weight")
+                self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+                self.additional_params.append(self.ffn_input_weight)
+                self.additional_params.append(self.ffn_inter_weight)
+                if params.ffn_thin_output:
+                    self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
+                    self.add_name(self.ffn_output_weight, "ffn_output_weight")
+                    self.additional_params.append(self.ffn_output_weight)
+                nn.init.constant_(self.ffn_input_weight, 0.0)
+                nn.init.constant_(self.ffn_inter_weight, 0.0)
+                if params.ffn_thin_output:
+                    nn.init.constant_(self.ffn_output_weight, 0.0)
 
         nn.init.constant_(self.self_kappa, 0.0)
         nn.init.constant_(self.encdec_kappa, 0.0)
-        nn.init.constant_(self.ffn_input_weight, 0.0)
-        nn.init.constant_(self.ffn_inter_weight, 0.0)
-        if params.ffn_thin_output:
-            nn.init.constant_(self.ffn_output_weight, 0.0)
 
     def load_additional_params(self):
         self_additional_params_dict = dict()
         encdec_additional_params_dict = dict()
         self_additional_params_dict["kappa"] = self.self_kappa
         encdec_additional_params_dict["kappa"] = self.encdec_kappa
-        encdec_additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
-        encdec_additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
-        if self.feed_forward.thin_output:
-            encdec_additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
+        if self.ffn_weights:
+            encdec_additional_params_dict["ffn_input_weight"] = self.ffn_input_weight
+            encdec_additional_params_dict["ffn_inter_weight"] = self.ffn_inter_weight
+            if self.feed_forward.thin_output:
+                encdec_additional_params_dict["ffn_output_weight"] = self.ffn_output_weight
         self.self_attention.attention.additional_params = self_additional_params_dict
         self.encdec_attention.attention.additional_params = encdec_additional_params_dict
         self.feed_forward.ffn_layer.additional_params = encdec_additional_params_dict
@@ -332,15 +339,16 @@ class PickyTransformerDecoderLayer(modules.Module):
         input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
         inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
 
-        self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
-        self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
-        if self.feed_forward.thin_output:
-            output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
-            self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
-            self.add_name(self.ffn_output_weight, "ffn_output_weight")
+        if self.ffn_weights:
+            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
+            if self.feed_forward.thin_output:
+                output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
+                self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
-        self.add_name(self.ffn_input_weight, "ffn_input_weight")
-        self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
+            self.add_name(self.ffn_input_weight, "ffn_input_weight")
+            self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         self.load_additional_params()
@@ -830,6 +838,7 @@ class PickyTransformer(modules.Module):
             skip_residual=True,
             residual_transform=True,
             outer_transform=True,
+            ffn_weights=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
