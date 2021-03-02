@@ -52,7 +52,8 @@ def main(args):
 
     for checkpoint in checkpoints:
         print("Loading checkpoint: %s" % checkpoint)
-        state = torch.load(checkpoint, map_location="cpu")["model"]
+        ckp = torch.load(checkpoint, map_location="cpu")
+        state = ckp["model"]
 
         for key in state:
             if key not in values:
@@ -63,7 +64,8 @@ def main(args):
     for key in values:
         values[key].div_(len(checkpoints))
 
-    state = {"step": 0, "epoch": 0, "model": values}
+    state = {"step": 0, "epoch": 0, "model": values, 
+             "pruned_heads": ckp["pruned_heads"] if "pruned_heads" in ckp.keys() else None}
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
