@@ -14,6 +14,7 @@ import thumt.models.headwise_transformer
 import thumt.models.moe_transformer
 import thumt.models.picky_transformer
 import thumt.models.residual_transformer
+import thumt.models.thinffn_transformer
 
 
 def get_model(name):
@@ -37,5 +38,7 @@ def get_model(name):
         return thumt.models.picky_transformer.PickyTransformer
     elif name == "residual_transformer":
         return thumt.models.residual_transformer.ResidualTransformer
+    elif name == "thinffn_transformer":
+        return thumt.models.thinffn_transformer.ThinFFNTransformer
     else:
         raise LookupError("Unknown model %s" % name)
