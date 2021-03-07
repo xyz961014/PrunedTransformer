@@ -274,7 +274,6 @@ class AdamOptimizer(Optimizer):
 
     def prune_heads_and_dims(self, heads_to_prune, indexes_to_prune, model):
         
-        import ipdb
         for name, var in self._slots.items():
             if re.search("attention", name):
                 parse_name = name.split(".")
@@ -317,6 +316,8 @@ class AdamOptimizer(Optimizer):
                         layer = getattr(model, parse_name[0]).layers[num_layer]
                         if parse_name[-2] == "layer_norm" and getattr(layer, parse_name[3]).normalization == "before":
                             continue
+                        if getattr(layer, parse_name[3]).thin_ffn:
+                            continue
                         input_size = getattr(layer, parse_name[3]).attention.o_transform.weight.size(0)
                         input_index = utils.reverse_select(index["input"], input_size)
                         index = torch.Tensor(input_index).to(var["m"]).long()
@@ -335,6 +336,7 @@ class AdamOptimizer(Optimizer):
                     input_size = feed_forward.ffn_layer.input_transform.weight.size(1)
                     inter_size = feed_forward.ffn_layer.input_transform.weight.size(0)
                     output_size = feed_forward.ffn_layer.output_transform.weight.size(0)
+                    thin_ffn = feed_forward.thin_ffn
 
                     input_index = utils.reverse_select(index["input"], input_size)
                     inter_index = utils.reverse_select(index["inter"], inter_size)
@@ -362,14 +364,21 @@ class AdamOptimizer(Optimizer):
                         elif parse_name[-1] == "bias":
                             self._slots[name]["m"] = var["m"].index_select(0, output_index)
                             self._slots[name]["v"] = var["v"].index_select(0, output_index)
-                    elif parse_name[-2] == "outer_transform":
+                    elif parse_name[-2] == "entry_transform":
+                        if parse_name[-1] == "weight":
+                            self._slots[name]["m"] = var["m"].index_select(0, input_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, input_index)
+                        elif parse_name[-1] == "bias":
+                            self._slots[name]["m"] = var["m"].index_select(0, input_index)
+                            self._slots[name]["v"] = var["v"].index_select(0, input_index)
+                    elif parse_name[-2] == "exit_transform":
                         if parse_name[-1] == "weight":
                             self._slots[name]["m"] = var["m"].index_select(1, output_index)
                             self._slots[name]["v"] = var["v"].index_select(1, output_index)
                         elif parse_name[-1] == "bias":
                             # no need to prune here
                             pass
-                    elif parse_name[-2] == "layer_norm":
+                    elif parse_name[-2] == "layer_norm" and not thin_ffn:
                         self._slots[name]["m"] = var["m"].index_select(0, output_index)
                         self._slots[name]["v"] = var["v"].index_select(0, output_index)
             elif re.search("kappa", name):

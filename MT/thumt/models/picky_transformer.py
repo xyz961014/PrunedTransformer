@@ -24,6 +24,7 @@ class PickyAttentionSubLayer(modules.Module):
         self.dropout = params.residual_dropout
         self.normalization = params.normalization
         self.has_residual_transform = params.residual_transform
+        self.thin_ffn = params.thin_ffn
         self.pruned_heads = 0
 
         with utils.scope(name):
@@ -62,7 +63,8 @@ class PickyAttentionSubLayer(modules.Module):
         self.pruned_heads += len(heads)
 
     def prune_dim(self, index):
-        self.attention.prune_dim(index)
+        if not self.thin_ffn:
+            self.attention.prune_dim(index)
 
         if self.has_residual_transform:
             output_dim_to_reserve = utils.reverse_select(index["input"], self.residual_transform.weight.size(0))
@@ -108,9 +110,12 @@ class PickyFFNSubLayer(modules.Module):
         self.input_hidden_size = params.hidden_size
         self.output_hidden_size = params.hidden_size
         self.thin_output = params.ffn_thin_output
-        self.has_outer_transform = params.outer_transform
+        self.has_exit_transform = params.exit_transform
+        self.thin_ffn = params.thin_ffn
 
         with utils.scope(name):
+            if self.thin_ffn:
+                self.entry_transform = modules.Affine(params.hidden_size, params.hidden_size, name="entry_transform")
             self.ffn_layer = modules.PickyFeedForward(params.hidden_size,
                                                       params.filter_size,
                                                       dropout=params.relu_dropout,
@@ -118,22 +123,29 @@ class PickyFFNSubLayer(modules.Module):
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
             if self.thin_output:
-                if self.has_outer_transform:
-                    self.outer_transform = modules.Affine(params.hidden_size, params.hidden_size,
-                                                          name="outer_transform")
-                    self.reset_parameters()
+                if self.has_exit_transform:
+                    self.exit_transform = modules.Affine(params.hidden_size, params.hidden_size,
+                                                          name="exit_transform")
                 else:
-                    self.outer_transform = lambda x: x
+                    self.exit_transform = lambda x: x
+
+        self.reset_parameters()
 
     def prune_dim(self, index):
         self.ffn_layer.prune_dim(index, prune_output=self.thin_output)
         self.input_hidden_size = self.input_hidden_size - len(index["input"])
 
+        if self.thin_ffn:
+            input_dim_to_reserve = utils.reverse_select(index["input"], self.entry_transform.weight.size(0))
+            self.entry_transform = prune_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0)
+            self.input_hidden_size = len(input_dim_to_reserve)
+
         if self.thin_output:
-            if self.has_outer_transform:
-                output_dim_to_reserve = utils.reverse_select(index["output"], self.outer_transform.weight.size(1))
-                self.outer_transform = prune_linear_layer(self.outer_transform, output_dim_to_reserve, dim=1)
-                self.layer_norm.prune_dim(output_dim_to_reserve)
+            if self.has_exit_transform:
+                output_dim_to_reserve = utils.reverse_select(index["output"], self.exit_transform.weight.size(1))
+                self.exit_transform = prune_linear_layer(self.exit_transform, output_dim_to_reserve, dim=1)
+                if not self.thin_ffn:
+                    self.layer_norm.prune_dim(output_dim_to_reserve)
                 self.output_hidden_size = len(output_dim_to_reserve)
 
     def forward(self, x):
@@ -145,23 +157,32 @@ class PickyFFNSubLayer(modules.Module):
         else:
             y = x
 
+        if self.thin_ffn:
+            y = self.entry_transform(y)
         y = self.ffn_layer(y)
         y = nn.functional.dropout(y, self.dropout, self.training)
 
         if self.normalization == "before":
             if self.thin_output:
-                return self.outer_transform(x + y)
+                return self.exit_transform(x + y)
             else:
                 return y
         else:
             if self.thin_output:
-                return self.outer_transform(self.layer_norm(x + y))
+                if self.thin_ffn:
+                    return self.layer_norm(x + self.exit_transform(y))
+                else:
+                    return self.exit_transform(self.layer_norm(x + y))
             else:
                 return self.layer_norm(y)
 
     def reset_parameters(self):
-        nn.init.eye_(self.outer_transform.weight)
-        nn.init.constant_(self.outer_transform.bias, 0.0)
+        if self.thin_output and self.has_exit_transform:
+            nn.init.eye_(self.exit_transform.weight)
+            nn.init.constant_(self.exit_transform.bias, 0.0)
+        if self.thin_ffn:
+            nn.init.eye_(self.entry_transform.weight)
+            nn.init.constant_(self.entry_transform.bias, 0.0)
 
 
 class PickyTransformerEncoderLayer(modules.Module):
@@ -837,8 +858,9 @@ class PickyTransformer(modules.Module):
             ffn_thin_output=False, # will disable residual when set to False
             skip_residual=True,
             residual_transform=True,
-            outer_transform=True,
+            exit_transform=True,
             ffn_weights=True,
+            thin_ffn=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
