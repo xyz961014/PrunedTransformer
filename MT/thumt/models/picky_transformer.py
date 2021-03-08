@@ -357,10 +357,10 @@ class PickyTransformerDecoderLayer(modules.Module):
         self.encdec_attention.prune_dim(index)
         self.feed_forward.prune_dim(index)
 
-        input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
-        inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
-
         if self.ffn_weights:
+            input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+            inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+
             self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
             self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
             if self.feed_forward.thin_output:
@@ -499,6 +499,7 @@ class PickyTransformer(modules.Module):
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
         self.ffn_thin_output = params.ffn_thin_output
+        self.ffn_weights = params.ffn_weights
 
         self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
@@ -617,8 +618,16 @@ class PickyTransformer(modules.Module):
             for layer_num, heads in heads_to_prune["encoder"].items():
                 if len(heads) > 0:
                     layer = self.encoder.layers[layer_num]
-                    ffn_input_weight = layer.ffn_input_weight
-                    ffn_inter_weight = layer.ffn_inter_weight
+                    if self.ffn_weights:
+                        ffn_input_weight = layer.ffn_input_weight
+                        ffn_inter_weight = layer.ffn_inter_weight
+                    else:
+                        ffn_input_size = layer.feed_forward.ffn_layer.input_transform.weight.size(1)
+                        ffn_inter_size = layer.feed_forward.ffn_layer.input_transform.weight.size(0)
+                        ffn_input_weight = torch.randn(ffn_input_size)
+                        ffn_inter_weight = torch.randn(ffn_inter_size)
+                        ffn_input_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
+                        ffn_inter_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
 
                     prune_ratio = len(heads) / layer.self_attention.attention.num_heads
                     
@@ -635,7 +644,14 @@ class PickyTransformer(modules.Module):
                     indexes_to_prune["encoder"][layer_num]["inter"] = inter_indexes_to_prune
 
                     if self.ffn_thin_output:
-                        ffn_output_weight = layer.ffn_output_weight
+                        if self.ffn_weights:
+                            ffn_output_weight = layer.ffn_output_weight
+                        else:
+                            output_transform = layer.feed_forward.ffn_layer.output_transform
+                            ffn_output_size = output_transform.weight.size(0)
+                            ffn_output_weight = torch.randn(ffn_output_size)
+                            ffn_output_weight = ffn_output_weight.to(output_transform.weight)
+
                         output_dim_to_prune = math.floor(prune_ratio * ffn_output_weight.size(0))
                         output_indexes_to_prune = ffn_output_weight.topk(output_dim_to_prune, 
                                                                        largest=False, 
@@ -645,8 +661,16 @@ class PickyTransformer(modules.Module):
             for layer_num, heads in heads_to_prune["encdec"].items():
                 if len(heads) > 0:
                     layer = self.decoder.layers[layer_num]
-                    ffn_input_weight = layer.ffn_input_weight
-                    ffn_inter_weight = layer.ffn_inter_weight
+                    if self.ffn_weights:
+                        ffn_input_weight = layer.ffn_input_weight
+                        ffn_inter_weight = layer.ffn_inter_weight
+                    else:
+                        ffn_input_size = layer.feed_forward.ffn_layer.input_transform.weight.size(1)
+                        ffn_inter_size = layer.feed_forward.ffn_layer.input_transform.weight.size(0)
+                        ffn_input_weight = torch.randn(ffn_input_size)
+                        ffn_inter_weight = torch.randn(ffn_inter_size)
+                        ffn_input_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
+                        ffn_inter_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
 
                     prune_ratio = len(heads) / layer.encdec_attention.attention.num_heads
                     
@@ -663,7 +687,14 @@ class PickyTransformer(modules.Module):
                     indexes_to_prune["decoder"][layer_num]["inter"] = inter_indexes_to_prune
 
                     if self.ffn_thin_output:
-                        ffn_output_weight = layer.ffn_output_weight
+                        if self.ffn_weights:
+                            ffn_output_weight = layer.ffn_output_weight
+                        else:
+                            output_transform = layer.feed_forward.ffn_layer.output_transform
+                            ffn_output_size = output_transform.weight.size(0)
+                            ffn_output_weight = torch.randn(ffn_output_size)
+                            ffn_output_weight = ffn_output_weight.to(output_transform.weight)
+
                         output_dim_to_prune = math.floor(prune_ratio * ffn_output_weight.size(0))
                         output_indexes_to_prune = ffn_output_weight.topk(output_dim_to_prune, 
                                                                        largest=False, 
