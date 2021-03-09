@@ -67,9 +67,11 @@ def parse_args(args=None):
                         help="npy file containing head weights")
     parser.add_argument("--dim_prune_prob", type=float, default=0.0,
                         help="prune dims in FitTransformer or PickyTransformer")
-    parser.add_argument("--dim_prune_interval", type=int, default=0,
+    parser.add_argument("--dim_prune_interval", type=int, default=-1,
                         help="prune dims every N steps in FitTransformer or PickyTransformer"
-                             " set to 0 to disable it")
+                             " set to -1 to disable it. set to 0 to only prune at first")
+    parser.add_argument("--dim_prune_steps", type=int, nargs="+", default=[],
+                        help="list prune steps")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -587,7 +589,7 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob and not args.dim_prune_interval:
+        if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
             elif model.name == "picky_transformer":
@@ -723,7 +725,7 @@ def main(args):
 
                     return
 
-                if args.dim_prune_interval and step > 0 and step % args.dim_prune_interval == 0:
+                if (args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps:
                     if model.name == "fit_transformer":
                         index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
                         if index_len:
