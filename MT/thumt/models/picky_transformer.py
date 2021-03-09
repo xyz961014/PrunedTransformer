@@ -886,12 +886,12 @@ class PickyTransformer(modules.Module):
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
             weight_function="sigmoid",
-            ffn_thin_output=False, # will disable residual when set to False
-            skip_residual=True,
-            residual_transform=True,
+            ffn_thin_output=True, # will disable residual when set to False
+            skip_residual=False,
+            residual_transform=False,
             exit_transform=True,
-            ffn_weights=True,
-            thin_ffn=False,
+            ffn_weights=False,
+            thin_ffn=True,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
