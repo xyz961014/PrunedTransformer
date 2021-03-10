@@ -16,6 +16,7 @@ import json
 import socket
 import time
 import torch
+from pprint import pprint
 
 import thumt.data as data
 import torch.distributed as dist
@@ -63,6 +64,8 @@ def parse_args(args=None):
     # manually prune or weight
     parser.add_argument("--prune_json", type=str, default="",
                         help="json file containing heads to prune")
+    parser.add_argument("--prune_checkpoint", type=str, default="",
+                        help="model checkpoint containing heads to prune, will only load which head to prune")
     parser.add_argument("--weight_npy", type=str, default="",
                         help="npy file containing head weights")
     parser.add_argument("--dim_prune_prob", type=float, default=0.0,
@@ -593,12 +596,18 @@ def main(args):
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
             elif model.name == "picky_transformer":
-                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                if args.prune_checkpoint:
+                    heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
+                else:
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 model.prune_heads(heads_to_prune)
                 model.prune_dim(indexes_to_prune)
+                if dist.get_rank() == 0:
+                    print("Pruned Heads:")
+                    pprint(heads_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -615,16 +624,22 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob and not args.dim_prune_interval:
+        if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
             elif model.name == "picky_transformer":
-                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                if args.prune_checkpoint:
+                    heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
+                else:
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 model.prune_heads(heads_to_prune)
                 model.prune_dim(indexes_to_prune)
+                if dist.get_rank() == 0:
+                    print("Pruned Heads:")
+                    pprint(heads_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -638,16 +653,22 @@ def main(args):
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
         prune_model(model, args.prune_json)
-        if args.dim_prune_prob and not args.dim_prune_interval:
+        if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
             elif model.name == "picky_transformer":
-                heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                if args.prune_checkpoint:
+                    heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
+                else:
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 model.prune_heads(heads_to_prune)
                 model.prune_dim(indexes_to_prune)
+                if dist.get_rank() == 0:
+                    print("Pruned Heads:")
+                    pprint(heads_to_prune)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
