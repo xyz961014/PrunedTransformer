@@ -38,7 +38,7 @@ def latest_checkpoint(path):
     names = glob.glob(os.path.join(path, "*.pt"))
 
     if not names:
-        return None
+        return path
 
     latest_counter = 0
     checkpoint_name = names[0]
