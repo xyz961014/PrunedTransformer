@@ -188,6 +188,7 @@ class Transformer(modules.Module):
         self.attention_hidden_size = params.num_heads * params.head_size
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
+        self.return_state = params.return_state
         self.reset_parameters()
 
     def build_embedding(self, params):
@@ -305,7 +306,7 @@ class Transformer(modules.Module):
         state = self.empty_state(features["target"].shape[0],
                                  labels.device)
         state = self.encode(features, state)
-        logits, _ = self.decode(features, state, mode=mode)
+        logits, state = self.decode(features, state, mode=mode)
         loss = self.criterion(logits, labels)
         mask = mask.to(torch.float32)
 
@@ -315,11 +316,16 @@ class Transformer(modules.Module):
 
         if mode == "eval":
             if level == "sentence":
-                return -torch.sum(loss * mask, 1)
+                loss = -torch.sum(loss * mask, 1)
             else:
-                return  torch.exp(-loss) * mask - (1 - mask)
+                loss = torch.exp(-loss) * mask - (1 - mask)
+        else:
+            loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
-        return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+        if self.return_state:
+            return loss, logits, state
+        else:
+            return loss
 
     def empty_state(self, batch_size, device):
         state = {
@@ -366,6 +372,7 @@ class Transformer(modules.Module):
             normalization="after",
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
+            return_state=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
@@ -423,6 +430,7 @@ class Transformer(modules.Module):
         params.hidden_size = 64
         params.filter_size = 256
         params.num_heads = 4
+        head_size = 16
         params.residual_dropout = 0.0
         params.learning_rate = 5e-4
         params.train_steps = 100000
