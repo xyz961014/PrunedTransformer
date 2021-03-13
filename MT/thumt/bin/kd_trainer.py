@@ -60,6 +60,10 @@ def parse_args(args=None):
     # KD settings
     parser.add_argument("--temperature", type=float, default=4.0,
                         help="temperature for distillation")
+    parser.add_argument("--kd_weight", type=float, default=1.0,
+                        help="init kd loss weight for distillation")
+    parser.add_argument("--hard_label_weight", type=float, default=1.0,
+                        help="init hard label weight for distillation")
     parser.add_argument("--kd_steps", type=int,
                         help="steps when kd weight linearly drop to 0")
     parser.add_argument("--kd_loss_type", type=str, default="ce",
@@ -499,13 +503,21 @@ def main(args):
 
     def kd_weight_fn(step):
         if step < args.kd_steps:
-            return (args.kd_steps - step) / args.kd_steps
+            return (args.kd_steps - step) / args.kd_steps * args.kd_weight
         else:
             return 0.
 
     def kd_temp_fn(step):
-        return kd_weight_fn(step) * args.temperature
+        if step < args.kd_steps:
+            return (args.kd_steps - step) / args.kd_steps * args.temperature
+        else:
+            return 1e-9
 
+    def hard_weight_fn(step):
+        if step < args.kd_steps:
+            return step / args.kd_steps * args.hard_label_weight
+        else:
+            return 1.0
 
     def train_fn(inputs):
         features, labels = inputs
@@ -537,7 +549,8 @@ def main(args):
             soft_label, t_state = teach_fn(features)
             kd_loss = kd_loss_fn(logits, soft_label, kd_temp_fn(step))
             kd_weight = kd_weight_fn(step)
-            loss = kd_weight * kd_loss + hard_label_loss
+            hard_weight = hard_weight_fn(step)
+            loss = kd_weight * kd_loss + hard_weight * hard_label_loss
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
             grads_and_vars = exclude_variables(
