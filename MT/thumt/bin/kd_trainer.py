@@ -509,9 +509,9 @@ def main(args):
 
     def kd_temp_fn(step):
         if step < args.kd_steps:
-            return (args.kd_steps - step) / args.kd_steps * args.temperature
+            return 1.0 + (args.kd_steps - step) / args.kd_steps * (args.temperature - 1.0)
         else:
-            return 1e-9
+            return 1.0
 
     def hard_weight_fn(step):
         if step < args.kd_steps:
