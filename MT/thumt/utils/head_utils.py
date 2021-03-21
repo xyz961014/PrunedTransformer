@@ -90,7 +90,7 @@ def prune_vector(vector, index, scale=False):
     index = index.to(vector.device)
 
     V = vector.index_select(0, index).clone().detach()
-    if scale:
+    if scale and index.size(0):
         scale = vector.size(0) / index.size(0)
         V.mul_(scale)
 
