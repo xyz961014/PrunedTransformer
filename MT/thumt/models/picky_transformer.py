@@ -68,7 +68,7 @@ class PickyAttentionSubLayer(modules.Module):
 
         if self.has_residual_transform:
             output_dim_to_reserve = utils.reverse_select(index["input"], self.residual_transform.weight.size(0))
-            self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve)
+            self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve, scale=False)
             if not self.normalization == "before":
                 self.layer_norm.prune_dim(output_dim_to_reserve)
 
@@ -137,7 +137,7 @@ class PickyFFNSubLayer(modules.Module):
 
         if self.thin_ffn:
             input_dim_to_reserve = utils.reverse_select(index["input"], self.entry_transform.weight.size(0))
-            self.entry_transform = prune_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0)
+            self.entry_transform = prune_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0, scale=False)
             self.input_hidden_size = len(input_dim_to_reserve)
 
         if self.thin_output:
@@ -241,7 +241,7 @@ class PickyTransformerEncoderLayer(modules.Module):
             self.self_attention._prune_heads(heads)
             
             remain_heads = utils.reverse_select(heads, self.kappa.size(0))
-            self.kappa = prune_vector(self.kappa, remain_heads, scale=True)
+            self.kappa = prune_vector(self.kappa, remain_heads, scale=False)
             self.add_name(self.kappa, "kappa")
 
     def prune_dim(self, index):
@@ -254,11 +254,11 @@ class PickyTransformerEncoderLayer(modules.Module):
             input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
             inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
 
-            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=True)
-            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=True)
+            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
             if self.feed_forward.thin_output:
                 output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
-                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=True)
+                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
                 self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
@@ -340,7 +340,7 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.self_attention._prune_heads(heads)
             
             remain_heads = utils.reverse_select(heads, self.self_kappa.size(0))
-            self.self_kappa = prune_vector(self.self_kappa, remain_heads, scale=True)
+            self.self_kappa = prune_vector(self.self_kappa, remain_heads, scale=False)
             self.add_name(self.self_kappa, "self_kappa")
 
     def encdec_prune_heads(self, heads):
@@ -348,7 +348,7 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.encdec_attention._prune_heads(heads)
             
             remain_heads = utils.reverse_select(heads, self.encdec_kappa.size(0))
-            self.encdec_kappa = prune_vector(self.encdec_kappa, remain_heads, scale=True)
+            self.encdec_kappa = prune_vector(self.encdec_kappa, remain_heads, scale=False)
             self.add_name(self.encdec_kappa, "encdec_kappa")
 
     def prune_dim(self, index):
@@ -361,11 +361,11 @@ class PickyTransformerDecoderLayer(modules.Module):
             input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
             inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
 
-            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=True)
-            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=True)
+            self.ffn_input_weight = prune_vector(self.ffn_input_weight, input_index, scale=False)
+            self.ffn_inter_weight = prune_vector(self.ffn_inter_weight, inter_index, scale=False)
             if self.feed_forward.thin_output:
                 output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
-                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=True)
+                self.ffn_output_weight = prune_vector(self.ffn_output_weight, output_index, scale=False)
                 self.add_name(self.ffn_output_weight, "ffn_output_weight")
 
             self.add_name(self.ffn_input_weight, "ffn_input_weight")

@@ -264,7 +264,7 @@ class PickyFeedForward(Module):
         input_index = utils.reverse_select(index["input"], self.input_transform.weight.size(1))
         inter_index = utils.reverse_select(index["inter"], self.input_transform.weight.size(0))
         self.input_transform = utils.prune_linear_layer(self.input_transform, input_index, dim=1, scale=False)
-        self.input_transform = utils.prune_linear_layer(self.input_transform, inter_index, dim=0, scale=False)
+        self.input_transform = utils.prune_linear_layer(self.input_transform, inter_index, dim=0, scale=True)
         self.output_transform = utils.prune_linear_layer(self.output_transform, inter_index, dim=1, scale=False)
 
         self.input_size = len(input_index)
@@ -272,7 +272,7 @@ class PickyFeedForward(Module):
 
         if prune_output:
             output_index = utils.reverse_select(index["output"], self.output_transform.weight.size(0))
-            self.output_transform = utils.prune_linear_layer(self.output_transform, output_index, dim=0, scale=False)
+            self.output_transform = utils.prune_linear_layer(self.output_transform, output_index, dim=0, scale=True)
 
             self.output_size = len(output_index)
 
