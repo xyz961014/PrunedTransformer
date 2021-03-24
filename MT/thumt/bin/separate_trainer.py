@@ -75,6 +75,8 @@ def parse_args(args=None):
                              " set to -1 to disable it. set to 0 to only prune at first")
     parser.add_argument("--dim_prune_steps", type=int, nargs="+", default=[],
                         help="list prune steps")
+    parser.add_argument("--random_prune", action="store_true",
+                        help="random prune heads")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -599,7 +601,7 @@ def main(args):
                 if args.prune_checkpoint:
                     heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
                 else:
-                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, random=args.random_prune)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
@@ -631,7 +633,7 @@ def main(args):
                 if args.prune_checkpoint:
                     heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
                 else:
-                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, random=args.random_prune)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
@@ -660,7 +662,7 @@ def main(args):
                 if args.prune_checkpoint:
                     heads_to_prune = torch.load(args.prune_checkpoint)["pruned_heads"]
                 else:
-                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, random=args.random_prune)
                 indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                 optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                 additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
@@ -756,7 +758,7 @@ def main(args):
                         optimizer.prune_dim(index, model.named_parameters())
                         additional_optimizer.prune_dim(index, model.named_parameters())
                     elif model.name == "picky_transformer":
-                        heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob)
+                        heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, random=args.random_prune)
                         indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                         optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                         additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
