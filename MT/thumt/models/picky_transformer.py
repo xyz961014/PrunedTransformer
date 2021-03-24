@@ -660,7 +660,7 @@ class PickyTransformer(modules.Module):
                         ffn_input_weight = torch.randn(ffn_input_size)
                         ffn_inter_weight = torch.randn(ffn_inter_size)
                         ffn_input_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
-                        ffn_inter_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
+                        ffn_inter_weight = ffn_inter_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
 
                     prune_ratio = len(heads) / layer.self_attention.attention.num_heads
                     
@@ -703,7 +703,7 @@ class PickyTransformer(modules.Module):
                         ffn_input_weight = torch.randn(ffn_input_size)
                         ffn_inter_weight = torch.randn(ffn_inter_size)
                         ffn_input_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
-                        ffn_inter_weight = ffn_input_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
+                        ffn_inter_weight = ffn_inter_weight.to(layer.feed_forward.ffn_layer.input_transform.weight)
 
                     prune_ratio = len(heads) / layer.encdec_attention.attention.num_heads
                     
