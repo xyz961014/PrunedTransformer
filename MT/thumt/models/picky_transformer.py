@@ -9,6 +9,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
 
 import thumt.utils as utils
 import thumt.modules as modules
@@ -586,39 +587,37 @@ class PickyTransformer(modules.Module):
             all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
             if random:
                 fake_kappas = []
-                fake_kappa_dict = {
-                        "encoder": {},
-                        "decoder": {},
-                        "encdec": {}
-                                  }
                 for num_layer, layer in enumerate(self.encoder.layers):
-                    fake_kappa = torch.zeros_like(layer.kappa).normal_()
-                    fake_kappas.append(fake_kappa)
-                    fake_kappa_dict["encoder"][num_layer] = fake_kappa
+                    layer.fake_kappa = torch.zeros_like(layer.kappa).normal_()
+                    fake_kappas.append(layer.fake_kappa)
                 for num_layer, layer in enumerate(self.decoder.layers):
-                    fake_self_kappa = torch.zeros_like(layer.self_kappa).normal_()
-                    fake_encdec_kappa = torch.zeros_like(layer.encdec_kappa).normal_()
-                    fake_kappas.append(fake_self_kappa)
-                    fake_kappas.append(fake_encdec_kappa)
-                    fake_kappa_dict["decoder"][num_layer] = fake_self_kappa
-                    fake_kappa_dict["encdec"][num_layer] = fake_encdec_kappa
+                    layer.fake_self_kappa = torch.zeros_like(layer.self_kappa).normal_()
+                    layer.fake_encdec_kappa = torch.zeros_like(layer.encdec_kappa).normal_()
+                    fake_kappas.append(layer.fake_self_kappa)
+                    fake_kappas.append(layer.fake_encdec_kappa)
+
+                for kappa in fake_kappas:
+                    dist.broadcast(kappa, 0)
 
                 all_kappa = torch.cat(fake_kappas)
                 num_heads_to_prune = math.floor(p * all_kappa.size(0))
                 threshold = all_kappa.sort()[0][num_heads_to_prune].item()
 
                 for num_layer, layer in enumerate(self.encoder.layers):
-                    for num_head, k in enumerate(fake_kappa_dict["encoder"][num_layer]):
+                    for num_head, k in enumerate(layer.fake_kappa):
                         if k.item() < threshold:
                             heads_to_prune["encoder"][num_layer].append(num_head)
+                    del layer.fake_kappa
 
                 for num_layer, layer in enumerate(self.decoder.layers):
-                    for num_head, k in enumerate(fake_kappa_dict["decoder"][num_layer]):
+                    for num_head, k in enumerate(layer.fake_self_kappa):
                         if k.item() < threshold:
                             heads_to_prune["decoder"][num_layer].append(num_head)
-                    for num_head, k in enumerate(fake_kappa_dict["encdec"][num_layer]):
+                    del layer.fake_self_kappa
+                    for num_head, k in enumerate(layer.fake_encdec_kappa):
                         if k.item() < threshold:
                             heads_to_prune["encdec"][num_layer].append(num_head)
+                    del layer.fake_encdec_kappa
 
                 return heads_to_prune
 
