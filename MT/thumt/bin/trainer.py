@@ -475,7 +475,7 @@ def main(args):
             summary.scalar("global_step/sec", t, step)
 
             if counter % params.update_cycle == 0:
-                if step > 0 and step % args.log_interval == 0:
+                if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
                     elapsed = time.time() - start_time
                     print('| epoch {:2d} | step {:8d} | lr {:02.2e} | '
                           'ms/step {:4.0f} | loss {:8.4f} '.format(
