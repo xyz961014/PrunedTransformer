@@ -62,8 +62,16 @@ def parse_args(args=None):
                         help="temperature for distillation")
     parser.add_argument("--kd_weight", type=float, default=1.0,
                         help="init kd loss weight for distillation")
-    parser.add_argument("--hard_label_weight", type=float, default=1.0,
+    parser.add_argument("--kd_final_weight", type=float, default=0.0,
+                        help="final kd loss weight for distillation")
+    parser.add_argument("--hard_label_init_weight", type=float, default=0.0,
                         help="init hard label weight for distillation")
+    parser.add_argument("--hard_label_weight", type=float, default=1.0,
+                        help="final hard label weight for distillation")
+    parser.add_argument("--kd_attention_loss", action="store_true",
+                        help="enable attention matrix alignment loss")
+    parser.add_argument("--kd_attention_loss_weight", type=float, default=1.0,
+                        help="kd attention loss weight for distillation")
     parser.add_argument("--kd_steps", type=int,
                         help="steps when kd weight linearly drop to 0")
     parser.add_argument("--kd_loss_type", type=str, default="ce",
@@ -470,6 +478,7 @@ def main(args):
         t_state = torch.load(t_checkpoint, map_location="cpu")
         teacher_model.load_state_dict(t_state["model"])
         teacher_model.return_state = True
+        teacher_model.output_weights = True
         broadcast(teacher_model)
     else:
         raise ValueError("teacher model params not loaded")
@@ -501,9 +510,36 @@ def main(args):
     elif args.kd_loss_type == "mse":
         kd_loss_fn = textbrewer.losses.kd_mse_loss
 
+    def kd_attention_loss_fn(teacher_state, student_state, features):
+        if args.kd_loss_type == "ce":
+            loss_fn = textbrewer.losses.att_ce_mean_loss
+        elif args.kd_loss_type == "mse":
+            loss_fn = textbrewer.losses.att_mse_sum_loss
+
+        attention_loss = 0.
+        num_matrix = 0
+        for t_weight, s_weight in list(zip(teacher_state["encoder_weights"], student_state["encoder_weights"])):
+            layer_attn_loss = loss_fn(s_weight, t_weight)
+            attention_loss += layer_attn_loss
+            num_matrix += 1
+
+        mask = features[0]["target_mask"]
+        for t_weight, s_weight in list(zip(teacher_state["decoder_weights"], student_state["decoder_weights"])):
+            layer_attn_loss = loss_fn(s_weight, t_weight, mask=mask)
+            attention_loss += layer_attn_loss
+            num_matrix += 1
+
+        for t_weight, s_weight in list(zip(teacher_state["cross_weights"], student_state["cross_weights"])):
+            layer_attn_loss = loss_fn(s_weight, t_weight)
+            attention_loss += layer_attn_loss
+            num_matrix += 1
+
+        return attention_loss / num_matrix 
+
     def kd_weight_fn(step):
         if step < args.kd_steps:
-            return (args.kd_steps - step) / args.kd_steps * args.kd_weight
+            return args.kd_final_weight + \
+                   (args.kd_steps - step) / args.kd_steps * (args.kd_weight - args.kd_final_weight)
         else:
             return 0.
 
@@ -515,7 +551,8 @@ def main(args):
 
     def hard_weight_fn(step):
         if step < args.kd_steps:
-            return step / args.kd_steps * args.hard_label_weight
+            return args.hard_label_init_weight + \
+                   step / args.kd_steps * (args.hard_label_weight - args.hard_label_init_weight)
         else:
             return 1.0
 
@@ -548,6 +585,9 @@ def main(args):
             # compute KD loss
             soft_label, t_state = teach_fn(features)
             kd_loss = kd_loss_fn(logits, soft_label, kd_temp_fn(step))
+            if args.kd_attention_loss:
+                kd_attention_loss = kd_attention_loss_fn(t_state, s_state, features)
+                kd_loss += kd_attention_loss * args.kd_attention_loss_weight
             kd_weight = kd_weight_fn(step)
             hard_weight = hard_weight_fn(step)
             loss = kd_weight * kd_loss + hard_weight * hard_label_loss

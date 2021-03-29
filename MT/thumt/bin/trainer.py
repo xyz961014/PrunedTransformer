@@ -445,8 +445,8 @@ def main(args):
 
     def train_fn(inputs):
         features, labels = inputs
-        loss = model(features, labels)
-        return loss
+        state = model(features, labels)
+        return state
 
     counter = 0
 
@@ -461,7 +461,7 @@ def main(args):
             counter += 1
             t = time.time()
             features = data.lookup(features, "train", params)
-            loss = train_fn(features)
+            loss, _, _ = train_fn(features)
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
             grads_and_vars = exclude_variables(

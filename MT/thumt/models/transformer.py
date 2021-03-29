@@ -28,25 +28,31 @@ class AttentionSubLayer(modules.Module):
                                                         params.attention_dropout)
             self.layer_norm = modules.LayerNorm(params.hidden_size)
 
-    def forward(self, x, bias, memory=None, state=None):
+    def forward(self, x, bias, memory=None, state=None, output_weights=True):
         if self.normalization == "before":
             y = self.layer_norm(x)
         else:
             y = x
 
         if self.training or state is None:
-            y = self.attention(y, bias, memory, None)
+            y, weights = self.attention(y, bias, memory, None, output_weights)
         else:
             kv = [state["k"], state["v"]]
-            y, k, v = self.attention(y, bias, memory, kv)
+            y, k, v, weights = self.attention(y, bias, memory, kv, output_weights)
             state["k"], state["v"] = k, v
 
         y = nn.functional.dropout(y, self.dropout, self.training)
 
-        if self.normalization == "before":
-            return x + y
+        if output_weights:
+            if self.normalization == "before":
+                return x + y, weights
+            else:
+                return self.layer_norm(x + y), weights
         else:
-            return self.layer_norm(x + y)
+            if self.normalization == "before":
+                return x + y, None
+            else:
+                return self.layer_norm(x + y), None
 
 
 class FFNSubLayer(modules.Module):
@@ -87,10 +93,10 @@ class TransformerEncoderLayer(modules.Module):
             self.self_attention = AttentionSubLayer(params)
             self.feed_forward = FFNSubLayer(params)
 
-    def forward(self, x, bias):
-        x = self.self_attention(x, bias)
+    def forward(self, x, bias, output_weights=False):
+        x, weights = self.self_attention(x, bias, output_weights=output_weights)
         x = self.feed_forward(x)
-        return x
+        return x, weights
 
 
 class TransformerDecoderLayer(modules.Module):
@@ -105,11 +111,11 @@ class TransformerDecoderLayer(modules.Module):
                                                     name="encdec_attention")
             self.feed_forward = FFNSubLayer(params)
 
-    def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
-        x = self.self_attention(x, attn_bias, state=state)
-        x = self.encdec_attention(x, encdec_bias, memory)
+    def __call__(self, x, attn_bias, encdec_bias, memory, state=None, output_weights=False):
+        x, self_weights = self.self_attention(x, attn_bias, state=state, output_weights=output_weights)
+        x, cross_weights = self.encdec_attention(x, encdec_bias, memory, output_weights=output_weights)
         x = self.feed_forward(x)
-        return x
+        return x, self_weights, cross_weights
 
 
 class TransformerEncoder(modules.Module):
@@ -128,14 +134,19 @@ class TransformerEncoder(modules.Module):
             else:
                 self.layer_norm = None
 
-    def forward(self, x, bias):
+    def forward(self, x, bias, output_weights=False):
+        weights_list = []
         for layer in self.layers:
-            x = layer(x, bias)
+            x, weights = layer(x, bias, output_weights=output_weights)
+            weights_list.append(weights)
 
         if self.normalization == "before":
             x = self.layer_norm(x)
 
-        return x
+        if output_weights:
+            return x, weights_list
+        else:
+            return x, None
 
 
 class TransformerDecoder(modules.Module):
@@ -155,18 +166,26 @@ class TransformerDecoder(modules.Module):
             else:
                 self.layer_norm = None
 
-    def forward(self, x, attn_bias, encdec_bias, memory, state=None):
+    def forward(self, x, attn_bias, encdec_bias, memory, state=None, output_weights=False):
+        self_weights_list, cross_weights_list = [], []
         for i, layer in enumerate(self.layers):
             if state is not None:
-                x = layer(x, attn_bias, encdec_bias, memory,
-                          state["decoder"]["layer_%d" % i])
+                x, self_weights, cross_weights = layer(x, attn_bias, encdec_bias, memory,
+                                                       state["decoder"]["layer_%d" % i],
+                                                       output_weights=output_weights)
             else:
-                x = layer(x, attn_bias, encdec_bias, memory, None)
+                x, self_weights, cross_weights = layer(x, attn_bias, encdec_bias, memory, None, output_weights)
+
+            self_weights_list.append(self_weights)
+            cross_weights_list.append(cross_weights)
 
         if self.normalization == "before":
             x = self.layer_norm(x)
 
-        return x
+        if output_weights:
+            return x, self_weights_list, cross_weights_list
+        else:
+            return x, None, None
 
 
 class Transformer(modules.Module):
@@ -189,6 +208,7 @@ class Transformer(modules.Module):
         self.num_encoder_layers = params.num_encoder_layers
         self.num_decoder_layers = params.num_decoder_layers
         self.return_state = params.return_state
+        self.output_weights = params.output_weights
         self.reset_parameters()
 
     def build_embedding(self, params):
@@ -261,8 +281,10 @@ class Transformer(modules.Module):
                                        self.training)
 
         enc_attn_bias = enc_attn_bias.to(inputs)
-        encoder_output = self.encoder(inputs, enc_attn_bias)
+        encoder_output, weights = self.encoder(inputs, enc_attn_bias, output_weights=self.output_weights)
 
+        if self.output_weights:
+            state["encoder_weights"] = weights
         state["encoder_output"] = encoder_output
         state["enc_attn_bias"] = enc_attn_bias
 
@@ -290,13 +312,18 @@ class Transformer(modules.Module):
             decoder_input = decoder_input[:, -1:, :]
             dec_attn_bias = dec_attn_bias[:, :, -1:, :]
 
-        decoder_output = self.decoder(decoder_input, dec_attn_bias,
-                                      enc_attn_bias, encoder_output, state)
+        decoder_output, self_weights, cross_weights = self.decoder(decoder_input, dec_attn_bias,
+                                                                   enc_attn_bias, encoder_output, state, 
+                                                                   output_weights=self.output_weights)
 
         decoder_output = torch.reshape(decoder_output, [-1, self.hidden_size])
         decoder_output = torch.transpose(decoder_output, -1, -2)
         logits = torch.matmul(self.softmax_embedding, decoder_output)
         logits = torch.transpose(logits, 0, 1)
+
+        if self.output_weights:
+            state["decoder_weights"] = self_weights
+            state["cross_weights"] = cross_weights
 
         return logits, state
 
@@ -373,6 +400,7 @@ class Transformer(modules.Module):
             shared_embedding_and_softmax_weights=False,
             shared_source_target_embedding=False,
             return_state=False,
+            output_weights=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

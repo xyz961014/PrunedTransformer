@@ -134,7 +134,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         self.reset_parameters()
 
-    def forward(self, query, bias, memory=None, kv=None):
+    def forward(self, query, bias, memory=None, kv=None, output_weights=False):
         q = self.q_transform(query)
 
         if memory is not None:
@@ -180,9 +180,15 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         output = self.o_transform(self.combine_heads(x))
 
         if kv is not None:
-            return output, k, v
+            if output_weights:
+                return output, k, v, weights
+            else:
+                return output, k, v, None
 
-        return output
+        if output_weights:
+            return output, weights
+        else:
+            return output, None
 
     def forward_with_head_analysis(self, query, bias, memory=None, kv=None, mode=None):
         q = self.q_transform(query)
