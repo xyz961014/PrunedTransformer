@@ -70,7 +70,7 @@ def parse_args(args=None):
                         help="final hard label weight for distillation")
     parser.add_argument("--kd_attention_loss", action="store_true",
                         help="enable attention matrix alignment loss")
-    parser.add_argument("--kd_attention_loss_weight", type=float, default=1.0,
+    parser.add_argument("--kd_attention_loss_weight", type=float, default=2.0,
                         help="kd attention loss weight for distillation")
     parser.add_argument("--kd_steps", type=int,
                         help="steps when kd weight linearly drop to 0")
@@ -511,10 +511,7 @@ def main(args):
         kd_loss_fn = textbrewer.losses.kd_mse_loss
 
     def kd_attention_loss_fn(teacher_state, student_state, features):
-        if args.kd_loss_type == "ce":
-            loss_fn = textbrewer.losses.att_ce_mean_loss
-        elif args.kd_loss_type == "mse":
-            loss_fn = textbrewer.losses.att_mse_sum_loss
+        loss_fn = textbrewer.losses.att_mse_sum_loss
 
         attention_loss = 0.
         num_matrix = 0
