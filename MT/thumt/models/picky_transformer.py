@@ -501,6 +501,8 @@ class PickyTransformer(modules.Module):
         self.num_decoder_layers = params.num_decoder_layers
         self.ffn_thin_output = params.ffn_thin_output
         self.ffn_weights = params.ffn_weights
+        self.head_weight_loss = params.head_weight_loss
+        self.head_weight_loss_weight = params.head_weight_loss_weight
 
         self.additional_params = self.encoder.additional_params + self.decoder.additional_params
         self.reset_parameters()
@@ -804,6 +806,15 @@ class PickyTransformer(modules.Module):
                     else:
                         self.weights["encdec"]["layer_{}".format(layer_i)][head_i] += w
 
+    def compute_head_weight_loss(self):
+        encoder_kappa = torch.cat([layer.kappa for layer in self.encoder.layers])
+        decoder_kappa = torch.cat([layer.self_kappa for layer in self.decoder.layers])
+        encdec_kappa = torch.cat([layer.encdec_kappa for layer in self.decoder.layers])
+        all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
+        all_half = torch.ones_like(all_kappa) * 0.5
+        loss = (all_kappa - all_half).norm(p=1) * self.head_weight_loss_weight
+        return loss
+
     def encode(self, features, state):
         src_seq = features["source"]
         src_mask = features["source_mask"]
@@ -871,11 +882,17 @@ class PickyTransformer(modules.Module):
 
         if mode == "eval":
             if level == "sentence":
-                return -torch.sum(loss * mask, 1)
+                loss = -torch.sum(loss * mask, 1)
             else:
-                return  torch.exp(-loss) * mask - (1 - mask)
+                loss = torch.exp(-loss) * mask - (1 - mask)
+        else:
+            loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
-        return (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
+        if self.head_weight_loss:
+            weights_loss = self.compute_head_weight_loss()
+            loss += weights_loss
+
+        return loss
 
     def empty_state(self, batch_size, device):
         state = {
@@ -929,6 +946,8 @@ class PickyTransformer(modules.Module):
             exit_transform=True,
             ffn_weights=False,
             thin_ffn=True,
+            head_weight_loss=False,
+            head_weight_loss_weight=0.1,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,
