@@ -147,7 +147,7 @@ def default_params():
         additional_clip_grad_norm=5.0,
         additional_learning_rate=1.0,
         additional_initial_learning_rate=0.0,
-        additional_learning_rate_schedule="linear_warmup_rsqrt_decay",
+        additional_learning_rate_schedule="constant",
         additional_learning_rate_boundaries=[0],
         additional_learning_rate_values=[0.0],
         additional_start_decay_step=0,
