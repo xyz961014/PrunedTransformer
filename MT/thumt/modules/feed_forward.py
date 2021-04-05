@@ -276,6 +276,17 @@ class PickyFeedForward(Module):
 
             self.output_size = len(output_index)
 
+    def reinit_dim(self, index):
+        pass
+        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
+            return
+        input_index = utils.reverse_select(index["input"], self.input_transform.weight.size(1))
+        inter_index = utils.reverse_select(index["inter"], self.input_transform.weight.size(0))
+        output_index = utils.reverse_select(index["output"], self.output_transform.weight.size(0))
+        self.input_transform = utils.reinit_linear_layer(self.input_transform, input_index, dim=1)
+        self.input_transform = utils.reinit_linear_layer(self.input_transform, inter_index, dim=0)
+        self.output_transform = utils.reinit_linear_layer(self.output_transform, inter_index, dim=1)
+        self.output_transform = utils.reinit_linear_layer(self.output_transform, output_index, dim=0)
 
     def forward(self, x):
         # apply soft weights

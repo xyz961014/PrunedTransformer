@@ -96,7 +96,7 @@ class Optimizer(object):
         loss.backward()
         return [v.grad if v is not None else None for v in var_list]
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         raise NotImplementedError("Not implemented")
 
     @property
@@ -121,7 +121,7 @@ class SGDOptimizer(Optimizer):
         if "clipper" in kwargs and kwargs["clipper"] is not None:
             self._clipper = kwargs["clipper"]
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         self._iterations += 1
         lr = self._learning_rate
         grads, var_list = list(zip(*grads_and_vars))
@@ -189,13 +189,16 @@ class AdamOptimizer(Optimizer):
         if "clipper" in kwargs and kwargs["clipper"] is not None:
             self._clipper = kwargs["clipper"]
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         self._iterations += 1
         lr = self._learning_rate
         beta_1 = self._beta_1
         beta_2 = self._beta_2
         epsilon = self._epsilon
         grads, var_list = list(zip(*grads_and_vars))
+        
+        if grad_masks is None:
+            grad_masks = [None for _ in grads]
 
         if self._summaries:
             grad_norm = _save_summary(zip(grads, var_list))
@@ -208,13 +211,19 @@ class AdamOptimizer(Optimizer):
             if reject:
                 return
 
-        for grad, var in zip(grads, var_list):
+        assert len(grads) == len(var_list) == len(grad_masks)
+
+        for grad, var, mask in zip(grads, var_list, grad_masks):
             if grad is None:
                 continue
 
             # Convert if grad is not FP32
             grad = grad.data.float()
             name, var = var
+
+            if mask is not None:
+                # update whereever mask is True
+                grad.masked_fill_(mask.eq(False), 0.0)
 
             if self._slots.get(name, None) is None:
                 self._slots[name] = {}
@@ -446,7 +455,7 @@ class AdadeltaOptimizer(Optimizer):
         if "clipper" in kwargs and kwargs["clipper"] is not None:
             self._clipper = kwargs["clipper"]
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         self._iterations += 1
         lr = self._learning_rate
         rho = self._rho
@@ -566,7 +575,7 @@ class LossScalingOptimizer(Optimizer):
 
         return [v.grad if v is not None else None for v in var_list]
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         self._iterations += 1
         grads, var_list = list(zip(*grads_and_vars))
         new_grads = []
@@ -590,7 +599,7 @@ class LossScalingOptimizer(Optimizer):
                 new_grads.append(grad.data.float().mul_(1.0 / self._scale))
 
         self._update_if_finite_grads()
-        self._optimizer.apply_gradients(zip(new_grads, var_list))
+        self._optimizer.apply_gradients(zip(new_grads, var_list), grad_masks)
 
     def state_dict(self):
         state = {
@@ -623,7 +632,7 @@ class MultiStepOptimizer(Optimizer):
         else:
             return self._optimizer.compute_gradients(loss, var_list, True)
 
-    def apply_gradients(self, grads_and_vars):
+    def apply_gradients(self, grads_and_vars, grad_masks=None):
         size = dist.get_world_size()
         grads, var_list = list(zip(*grads_and_vars))
         self._iterations += 1
@@ -633,7 +642,7 @@ class MultiStepOptimizer(Optimizer):
                 self.sync_gradients(grads, compress=self._compress)
                 self.scale_gradients(grads, 1.0 / size)
 
-            self._optimizer.apply_gradients(zip(grads, var_list))
+            self._optimizer.apply_gradients(zip(grads, var_list), grad_masks)
         else:
             if self._iterations % self._n != 0:
                 return
@@ -642,7 +651,7 @@ class MultiStepOptimizer(Optimizer):
                 self.sync_gradients(grads, compress=self._compress)
 
             self.scale_gradients(grads, 1.0 / (self._n * size))
-            self._optimizer.apply_gradients(zip(grads, var_list))
+            self._optimizer.apply_gradients(zip(grads, var_list), grad_masks)
 
     def prune_dim(self, index, model_params):
         self._optimizer.prune_dim(index, model_params)

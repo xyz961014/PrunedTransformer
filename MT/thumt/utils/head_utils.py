@@ -11,6 +11,70 @@ from tqdm import tqdm
 import thumt.data as data
 
 
+def reverse_select(index, length):
+    all_index = list(range(length))
+    return [ind for ind in all_index if not ind in index]
+
+def headwise_mask(var, head_size, dim, heads):
+    n_heads = var.size(dim) // head_size
+    mask = torch.ones(n_heads, head_size)
+    for head in heads:
+        mask[head] = 0
+    mask = mask.view(-1).contiguous().eq(0)
+    index = torch.arange(len(mask))[mask].long()
+    if var.dtype == torch.bool:
+        var_mask = var.clone().detach()
+    else:
+        var_mask = torch.zeros_like(var).bool()
+    var_mask.index_fill_(dim, index, True)
+    return var_mask
+
+def reinit_linear_layer(layer, index, dim):
+    from thumt.modules import Affine
+    if not isinstance(index, torch.Tensor):
+        index = torch.Tensor(index).long()
+    reverse_index = reverse_select(index, layer.weight.size(dim))
+    reverse_index = torch.Tensor(reverse_index).long()
+
+    layer.weight.requires_grad = False
+    if layer.bias is not None:
+        layer.bias.requires_grad = False
+    # reset dims to reinit
+    layer.weight.index_fill_(dim, reverse_index, 0.0)
+    if layer.bias is not None and dim == 0:
+        layer.bias.index_fill_(0, reverse_index, 0.0)
+
+    # new init 
+    newly_init_layer = Affine(layer.weight.size(1), layer.weight.size(0), 
+                              bias=layer.bias is not None).to(layer.weight.device)
+    newly_init_layer.weight.requires_grad = False
+    if newly_init_layer.bias is not None:
+        newly_init_layer.bias.requires_grad = False
+    # keep dims unchange in certain dims
+    newly_init_layer.weight.index_fill_(dim, index, 0.0)
+    if newly_init_layer.bias is not None and dim == 0:
+        newly_init_layer.bias.index_fill_(0, index, 0.0)
+
+    # add them
+    layer.weight += newly_init_layer.weight.clone().detach()
+    if layer.bias is not None and dim == 0:
+        layer.bias += newly_init_layer.bias.clone().detach()
+
+    layer.weight.requires_grad = True
+    if layer.bias is not None:
+        layer.bias.requires_grad = True
+    return layer
+
+def reinit_vector_(vector, index):
+    # initialize wherever not in index with 0
+    if not isinstance(index, torch.Tensor):
+        index = torch.Tensor(index).long()
+    reverse_index = reverse_select(index, vector.size(0))
+    reverse_index = torch.Tensor(reverse_index).long()
+    vector.requires_grad = False
+    vector = vector.index_fill_(0, reverse_index, 0.0)
+    vector.requires_grad = True
+
 def visualize_head_selection(model, pattern, func=None, env=None, step=None):
     """
         Visualize head selection in bar using visdom

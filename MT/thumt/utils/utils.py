@@ -31,7 +31,3 @@ def dim_dropout(x, p=0.5, training=True, dim=0):
     mask = mask.div_(1 - p)
     mask = mask.expand_as(x)
     return x * mask
-
-def reverse_select(index, length):
-    all_index = list(range(length))
-    return [ind for ind in all_index if not ind in index]

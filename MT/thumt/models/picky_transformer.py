@@ -15,6 +15,7 @@ import thumt.utils as utils
 import thumt.modules as modules
 
 from thumt.utils import prune_linear_layer, prune_vector
+from thumt.utils import reinit_linear_layer, reinit_vector_
 
 
 class PickyAttentionSubLayer(modules.Module):
@@ -72,6 +73,24 @@ class PickyAttentionSubLayer(modules.Module):
             self.residual_transform = prune_linear_layer(self.residual_transform, output_dim_to_reserve, scale=False)
             if not self.normalization == "before":
                 self.layer_norm.prune_dim(output_dim_to_reserve)
+
+    def reinit_heads(self, heads):
+        if len(heads) == 0:
+            return
+        index = utils.find_pruneable_heads_indices(
+            heads, 
+            self.attention.num_heads, 
+            self.attention.head_size, 
+        )
+        # Reinitialize linear layers
+        self.attention.q_transform = reinit_linear_layer(self.attention.q_transform, index, dim=0)
+        self.attention.k_transform = reinit_linear_layer(self.attention.k_transform, index, dim=0)
+        self.attention.v_transform = reinit_linear_layer(self.attention.v_transform, index, dim=0)
+        self.attention.o_transform = reinit_linear_layer(self.attention.o_transform, index, dim=1)
+
+    def reinit_dim(self, index):
+        # no need to do this
+        pass
 
     def forward(self, x, bias, memory=None, state=None):
         if self.attention.num_heads == 0:
@@ -138,16 +157,26 @@ class PickyFFNSubLayer(modules.Module):
 
         if self.thin_ffn:
             input_dim_to_reserve = utils.reverse_select(index["input"], self.entry_transform.weight.size(0))
-            self.entry_transform = prune_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0, scale=False)
+            self.entry_transform = prune_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0)
             self.input_hidden_size = len(input_dim_to_reserve)
 
-        if self.thin_output:
-            if self.has_exit_transform:
-                output_dim_to_reserve = utils.reverse_select(index["output"], self.exit_transform.weight.size(1))
-                self.exit_transform = prune_linear_layer(self.exit_transform, output_dim_to_reserve, dim=1)
-                if not self.thin_ffn:
-                    self.layer_norm.prune_dim(output_dim_to_reserve)
-                self.output_hidden_size = len(output_dim_to_reserve)
+        if self.thin_output and self.has_exit_transform:
+            output_dim_to_reserve = utils.reverse_select(index["output"], self.exit_transform.weight.size(1))
+            self.exit_transform = prune_linear_layer(self.exit_transform, output_dim_to_reserve, dim=1)
+            if not self.thin_ffn:
+                self.layer_norm.prune_dim(output_dim_to_reserve)
+            self.output_hidden_size = len(output_dim_to_reserve)
+
+    def reinit_dim(self, index):
+        self.ffn_layer.reinit_dim(index)
+
+        if self.thin_ffn:
+            input_dim_to_reserve = utils.reverse_select(index["input"], self.entry_transform.weight.size(0))
+            self.entry_transform = reinit_linear_layer(self.entry_transform, input_dim_to_reserve, dim=0)
+
+        if self.thin_output and self.has_exit_transform:
+            output_dim_to_reserve = utils.reverse_select(index["output"], self.exit_transform.weight.size(1))
+            self.exit_transform = reinit_linear_layer(self.exit_transform, output_dim_to_reserve, dim=1)
 
     def forward(self, x):
         if self.input_hidden_size == 0:
@@ -265,6 +294,33 @@ class PickyTransformerEncoderLayer(modules.Module):
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
+    def reinit_heads(self, heads):
+        if len(heads) > 0:
+            self.self_attention.reinit_heads(heads)
+            self.reinit_kappa(heads)
+
+    def reinit_dim(self, index):
+        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
+            return
+        self.feed_forward.reinit_dim(index)
+        if self.ffn_weights:
+            self.reinit_ffn_weights(index)
+
+    def reinit_kappa(self, heads):
+        remain_heads = utils.reverse_select(heads, self.kappa.size(0))
+        reinit_vector_(self.kappa, remain_heads)
+
+    def reinit_ffn_weights(self, index):
+        if self.ffn_weights:
+            input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+            inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+
+            reinit_vector_(self.ffn_input_weight, input_index)
+            reinit_vector_(self.ffn_inter_weight, inter_index)
+            if self.feed_forward.thin_output:
+                output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+                reinit_vector_(self.ffn_output_weight, output_index)
+
     def forward(self, x, bias):
         self.load_additional_params()
         y = self.self_attention(x, bias)
@@ -372,6 +428,42 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
+    def self_reinit_heads(self, heads):
+        if len(heads) > 0:
+            self.self_attention.reinit_heads(heads)
+            self.reinit_self_kappa(heads)
+
+    def encdec_reinit_heads(self, heads):
+        if len(heads) > 0:
+            self.encdec_attention.reinit_heads(heads)
+            self.reinit_encdec_kappa(heads)
+
+    def reinit_dim(self, index):
+        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
+            return
+        self.feed_forward.reinit_dim(index)
+        if self.ffn_weights:
+            self.reinit_ffn_weights(index)
+
+    def reinit_self_kappa(self, heads):
+        remain_heads = utils.reverse_select(heads, self.self_kappa.size(0))
+        reinit_vector_(self.self_kappa, remain_heads)
+
+    def reinit_encdec_kappa(self, heads):
+        remain_heads = utils.reverse_select(heads, self.encdec_kappa.size(0))
+        reinit_vector_(self.encdec_kappa, remain_heads)
+
+    def reinit_ffn_weights(self, index):
+        if self.ffn_weights:
+            input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
+            inter_index = utils.reverse_select(index["inter"], self.ffn_inter_weight.size(0))
+
+            reinit_vector_(self.ffn_input_weight, input_index)
+            reinit_vector_(self.ffn_inter_weight, inter_index)
+            if self.feed_forward.thin_output:
+                output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
+                reinit_vector_(self.ffn_output_weight, output_index)
+
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         self.load_additional_params()
         y = self.self_attention(x, attn_bias, state=state)
@@ -414,8 +506,17 @@ class PickyTransformerEncoder(modules.Module):
     def prune_dim(self, indexes):
         for (_, index), layer in list(zip(indexes.items(), self.layers)):
             layer.prune_dim(index)
-        if self.normalization == "before":
-            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+        #if self.normalization == "before":
+        #    self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+
+    def _reinit_heads(self, heads_to_reinit):
+        for layer, heads in heads_to_reinit.items():
+            layer = int(layer)
+            self.layers[layer].reinit_heads(heads)
+
+    def reinit_dim(self, indexes):
+        for (_, index), layer in list(zip(indexes.items(), self.layers)):
+            layer.reinit_dim(index)
 
     def forward(self, x, bias):
         for layer in self.layers:
@@ -463,8 +564,21 @@ class PickyTransformerDecoder(modules.Module):
     def prune_dim(self, indexes):
         for (_, index), layer in list(zip(indexes.items(), self.layers)):
             layer.prune_dim(index)
-        if self.normalization == "before":
-            self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+        #if self.normalization == "before":
+        #    self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
+
+    def _reinit_heads(self, self_heads_to_reinit, encdec_heads_to_reinit):
+        for layer, heads in self_heads_to_reinit.items():
+            layer = int(layer)
+            self.layers[layer].self_reinit_heads(heads)
+
+        for layer, heads in encdec_heads_to_reinit.items():
+            layer = int(layer)
+            self.layers[layer].encdec_reinit_heads(heads)
+
+    def reinit_dim(self, indexes):
+        for (_, index), layer in list(zip(indexes.items(), self.layers)):
+            layer.reinit_dim(index)
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
@@ -759,6 +873,86 @@ class PickyTransformer(modules.Module):
 
         self.encoder.prune_dim(indexes=encoder_indexes)
         self.decoder.prune_dim(indexes=decoder_indexes)
+
+    def reinitialize_heads_and_dims(self, heads_to_reinit, indexes_to_reinit):
+        encoder_heads_to_reinit = heads_to_reinit["encoder"]
+        decoder_heads_to_reinit = heads_to_reinit["decoder"]
+        encdec_heads_to_reinit = heads_to_reinit["encdec"]
+        self.encoder._reinit_heads(encoder_heads_to_reinit)
+        self.decoder._reinit_heads(decoder_heads_to_reinit, encdec_heads_to_reinit)
+        
+        encoder_indexes = indexes_to_reinit["encoder"]
+        decoder_indexes = indexes_to_reinit["decoder"]
+        self.encoder.reinit_dim(indexes=encoder_indexes)
+        self.decoder.reinit_dim(indexes=decoder_indexes)
+
+    def get_trainable_masks(self, trainable_parameters, heads_to_reinit, indexes_to_reinit):
+        trainable_masks = []
+        head_size = self.params.head_size
+        for name, var in trainable_parameters:
+            parse_name = name.split(".")
+            if parse_name[0] in ["encoder", "decoder"]:
+                layer_num = int(parse_name[2])
+                module = parse_name[3]
+                if module == "self_attention":
+                    reinit_heads = heads_to_reinit[parse_name[0]][layer_num]
+                    if len(reinit_heads) > 0:
+                        if parse_name[-2] == "layer_norm" or parse_name[-1] == "bias":
+                            trainable_masks.append(torch.zeros_like(var).bool())
+                        else:
+                            if parse_name[-2] == "o_transform":
+                                trainable_masks.append(utils.headwise_mask(var, head_size, 0, reinit_heads))
+                            else:
+                                trainable_masks.append(utils.headwise_mask(var, head_size, 1, reinit_heads))
+                    else:
+                        trainable_masks.append(torch.zeros_like(var).bool())
+                elif module == "encdec_attention":
+                    reinit_heads = heads_to_reinit["encdec"][layer_num]
+                    if len(reinit_heads) > 0:
+                        if parse_name[-2] == "layer_norm" or parse_name[-1] == "bias":
+                            trainable_masks.append(torch.zeros_like(var).bool())
+                        else:
+                            if parse_name[-2] == "o_transform":
+                                trainable_masks.append(utils.headwise_mask(var, head_size, 1, reinit_heads))
+                            else:
+                                trainable_masks.append(utils.headwise_mask(var, head_size, 0, reinit_heads))
+                    else:
+                        trainable_masks.append(torch.zeros_like(var).bool())
+                elif module == "feed_forward":
+                    reinit_dims = indexes_to_reinit[parse_name[0]][layer_num]
+                    ffn_module = parse_name[4]
+                    if len(reinit_dims["input"]) > 0 or len(reinit_dims["inter"]) > 0 or len(reinit_dims["output"]) > 0:
+                        if ffn_module == "entry_transform":
+                            reinit_dim = reinit_dims["input"]
+                            trainable_masks.append(utils.headwise_mask(var, 1, 0, reinit_dim))
+                        elif ffn_module == "ffn_layer":
+                            reinit_input_dim = reinit_dims["input"]
+                            reinit_inter_dim = reinit_dims["inter"]
+                            reinit_output_dim = reinit_dims["output"]
+                            if parse_name[-2] == "input_transform":
+                                t_mask = utils.headwise_mask(var, 1, 0, reinit_inter_dim)
+                                if parse_name[-1] == "weight":
+                                    t_mask = utils.headwise_mask(t_mask, 1, 1, reinit_input_dim)
+                                trainable_masks.append(t_mask)
+                            elif parse_name[-2] == "output_transform":
+                                t_mask = utils.headwise_mask(var, 1, 0, reinit_output_dim)
+                                if parse_name[-1] == "weight":
+                                    t_mask = utils.headwise_mask(t_mask, 1, 1, reinit_inter_dim)
+                                trainable_masks.append(t_mask)
+                        elif ffn_module == "exit_transform":
+                            reinit_dim = reinit_dims["output"]
+                            if parse_name[-1] == "weight":
+                                trainable_masks.append(utils.headwise_mask(var, 1, 1, reinit_dim))
+                            else:
+                                trainable_masks.append(torch.zeros_like(var).bool())
+                        elif ffn_module == "layer_norm":
+                            trainable_masks.append(torch.zeros_like(var).bool())
+                    else:
+                        trainable_masks.append(torch.zeros_like(var).bool())
+            else:
+                trainable_masks.append(torch.zeros_like(var).bool())
+
+        return trainable_masks
 
     def summary_weights(self, summary, step, accumulate_steps=100):
         # summary mean in step interval

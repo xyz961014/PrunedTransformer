@@ -352,7 +352,7 @@ class Transformer(modules.Module):
         if self.return_state:
             return loss, logits, state
         else:
-            return loss
+            return loss, None, None
 
     def empty_state(self, batch_size, device):
         state = {
