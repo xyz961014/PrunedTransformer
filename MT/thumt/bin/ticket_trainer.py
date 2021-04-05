@@ -63,6 +63,8 @@ def parse_args(args=None):
     # reinitialization params
     parser.add_argument("--reinit_p", type=float, default=0.5,
                         help="proportion of model to reinitialize per time")
+    parser.add_argument("--recover_weights", action="store_true",
+                        help="Recover weights when reinitialize.")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -694,9 +696,9 @@ def main(args):
                     if model.name == "picky_transformer":
                         heads_to_reinit = model.find_pruneable_heads(args.reinit_p)
                         indexes_to_reinit = model.find_pruneable_dim(heads_to_reinit)
-                        model.reinitialize_heads_and_dims(heads_to_reinit, indexes_to_reinit)
+                        model.reinitialize_heads_and_dims(heads_to_reinit, indexes_to_reinit, recover_weights=args.recover_weights)
                         if dist.get_rank() == 0:
-                            print("Reinitialized Heads: \n")
+                            print("Reinitialized Heads: ")
                             pprint(heads_to_reinit)
                         trainable_masks = model.get_trainable_masks(trainable_parameters, heads_to_reinit, indexes_to_reinit)
 

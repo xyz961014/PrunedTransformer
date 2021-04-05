@@ -294,17 +294,27 @@ class PickyTransformerEncoderLayer(modules.Module):
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
-    def reinit_heads(self, heads):
+    def reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.self_attention.reinit_heads(heads)
-            self.reinit_kappa(heads)
+            if recover_weights:
+                with torch.no_grad():
+                    self.kappa.zero_()
+            else:
+                self.reinit_kappa(heads)
 
-    def reinit_dim(self, index):
+    def reinit_dim(self, index, recover_weights=False):
         if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
             return
         self.feed_forward.reinit_dim(index)
         if self.ffn_weights:
-            self.reinit_ffn_weights(index)
+            if recover_weights:
+                with torch.no_grad():
+                    self.ffn_input_weight.zero_()
+                    self.ffn_inter_weight.zero_()
+                    self.ffn_output_weight.zero_()
+            else:
+                self.reinit_ffn_weights(index)
 
     def reinit_kappa(self, heads):
         remain_heads = utils.reverse_select(heads, self.kappa.size(0))
@@ -428,22 +438,36 @@ class PickyTransformerDecoderLayer(modules.Module):
             self.add_name(self.ffn_input_weight, "ffn_input_weight")
             self.add_name(self.ffn_inter_weight, "ffn_inter_weight")
 
-    def self_reinit_heads(self, heads):
+    def self_reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.self_attention.reinit_heads(heads)
-            self.reinit_self_kappa(heads)
+            if recover_weights:
+                with torch.no_grad():
+                    self.self_kappa.zero_()
+            else:
+                self.reinit_self_kappa(heads)
 
-    def encdec_reinit_heads(self, heads):
+    def encdec_reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.encdec_attention.reinit_heads(heads)
-            self.reinit_encdec_kappa(heads)
+            if recover_weights:
+                with torch.no_grad():
+                    self.encdec_kappa.zero_()
+            else:
+                self.reinit_encdec_kappa(heads)
 
-    def reinit_dim(self, index):
+    def reinit_dim(self, index, recover_weights=False):
         if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
             return
         self.feed_forward.reinit_dim(index)
         if self.ffn_weights:
-            self.reinit_ffn_weights(index)
+            if recover_weights:
+                with torch.no_grad():
+                    self.ffn_input_weight.zero_()
+                    self.ffn_inter_weight.zero_()
+                    self.ffn_output_weight.zero_()
+            else:
+                self.reinit_ffn_weights(index)
 
     def reinit_self_kappa(self, heads):
         remain_heads = utils.reverse_select(heads, self.self_kappa.size(0))
@@ -509,14 +533,14 @@ class PickyTransformerEncoder(modules.Module):
         #if self.normalization == "before":
         #    self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
-    def _reinit_heads(self, heads_to_reinit):
+    def _reinit_heads(self, heads_to_reinit, recover_weights=False):
         for layer, heads in heads_to_reinit.items():
             layer = int(layer)
-            self.layers[layer].reinit_heads(heads)
+            self.layers[layer].reinit_heads(heads, recover_weights)
 
-    def reinit_dim(self, indexes):
+    def reinit_dim(self, indexes, recover_weights=False):
         for (_, index), layer in list(zip(indexes.items(), self.layers)):
-            layer.reinit_dim(index)
+            layer.reinit_dim(index, recover_weights)
 
     def forward(self, x, bias):
         for layer in self.layers:
@@ -567,18 +591,18 @@ class PickyTransformerDecoder(modules.Module):
         #if self.normalization == "before":
         #    self.layer_norm.prune_dim(utils.reverse_select(index["output"], self.layer_norm.weight.size(0)))
 
-    def _reinit_heads(self, self_heads_to_reinit, encdec_heads_to_reinit):
+    def _reinit_heads(self, self_heads_to_reinit, encdec_heads_to_reinit, recover_weights=False):
         for layer, heads in self_heads_to_reinit.items():
             layer = int(layer)
-            self.layers[layer].self_reinit_heads(heads)
+            self.layers[layer].self_reinit_heads(heads, recover_weights)
 
         for layer, heads in encdec_heads_to_reinit.items():
             layer = int(layer)
-            self.layers[layer].encdec_reinit_heads(heads)
+            self.layers[layer].encdec_reinit_heads(heads, recover_weights)
 
-    def reinit_dim(self, indexes):
+    def reinit_dim(self, indexes, recover_weights=False):
         for (_, index), layer in list(zip(indexes.items(), self.layers)):
-            layer.reinit_dim(index)
+            layer.reinit_dim(index, recover_weights)
 
     def forward(self, x, attn_bias, encdec_bias, memory, state=None):
         for i, layer in enumerate(self.layers):
@@ -874,17 +898,17 @@ class PickyTransformer(modules.Module):
         self.encoder.prune_dim(indexes=encoder_indexes)
         self.decoder.prune_dim(indexes=decoder_indexes)
 
-    def reinitialize_heads_and_dims(self, heads_to_reinit, indexes_to_reinit):
+    def reinitialize_heads_and_dims(self, heads_to_reinit, indexes_to_reinit, recover_weights=False):
         encoder_heads_to_reinit = heads_to_reinit["encoder"]
         decoder_heads_to_reinit = heads_to_reinit["decoder"]
         encdec_heads_to_reinit = heads_to_reinit["encdec"]
-        self.encoder._reinit_heads(encoder_heads_to_reinit)
-        self.decoder._reinit_heads(decoder_heads_to_reinit, encdec_heads_to_reinit)
+        self.encoder._reinit_heads(encoder_heads_to_reinit, recover_weights)
+        self.decoder._reinit_heads(decoder_heads_to_reinit, encdec_heads_to_reinit, recover_weights)
         
         encoder_indexes = indexes_to_reinit["encoder"]
         decoder_indexes = indexes_to_reinit["decoder"]
-        self.encoder.reinit_dim(indexes=encoder_indexes)
-        self.decoder.reinit_dim(indexes=decoder_indexes)
+        self.encoder.reinit_dim(encoder_indexes, recover_weights)
+        self.decoder.reinit_dim(decoder_indexes, recover_weights)
 
     def get_trainable_masks(self, trainable_parameters, heads_to_reinit, indexes_to_reinit):
         trainable_masks = []
@@ -1005,8 +1029,11 @@ class PickyTransformer(modules.Module):
         decoder_kappa = torch.cat([layer.self_kappa for layer in self.decoder.layers])
         encdec_kappa = torch.cat([layer.encdec_kappa for layer in self.decoder.layers])
         all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
-        all_half = torch.ones_like(all_kappa) * 0.5
-        loss = (all_kappa - all_half).norm(p=1) * self.head_weight_loss_weight
+        if self.head_weight_loss == "half":
+            crit = torch.ones_like(all_kappa) * 0.5
+        elif self.head_weight_loss == "zero":
+            crit = torch.zeros_like(all_kappa)
+        loss = (all_kappa - crit).norm(p=1) * self.head_weight_loss_weight
         return loss
 
     def encode(self, features, state):
@@ -1082,7 +1109,7 @@ class PickyTransformer(modules.Module):
         else:
             loss = (torch.sum(loss * mask) / torch.sum(mask)).to(logits)
 
-        if self.head_weight_loss:
+        if not self.head_weight_loss == "none":
             weights_loss = self.compute_head_weight_loss()
             loss += weights_loss
 
@@ -1140,7 +1167,7 @@ class PickyTransformer(modules.Module):
             exit_transform=True,
             ffn_weights=False,
             thin_ffn=True,
-            head_weight_loss=False,
+            head_weight_loss="none",
             head_weight_loss_weight=0.1,
             # Override default parameters
             warmup_steps=4000,
