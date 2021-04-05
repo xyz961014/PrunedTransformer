@@ -1025,9 +1025,10 @@ class PickyTransformer(modules.Module):
                         self.weights["encdec"]["layer_{}".format(layer_i)][head_i] += w
 
     def compute_head_weight_loss(self):
-        encoder_kappa = torch.cat([layer.kappa for layer in self.encoder.layers])
-        decoder_kappa = torch.cat([layer.self_kappa for layer in self.decoder.layers])
-        encdec_kappa = torch.cat([layer.encdec_kappa for layer in self.decoder.layers])
+        weight_func = self.encoder.layers[0].self_attention.attention.compute_weight
+        encoder_kappa = torch.cat([weight_func(layer.kappa) for layer in self.encoder.layers])
+        decoder_kappa = torch.cat([weight_func(layer.self_kappa) for layer in self.decoder.layers])
+        encdec_kappa = torch.cat([weight_func(layer.encdec_kappa) for layer in self.decoder.layers])
         all_kappa = torch.cat([encoder_kappa, decoder_kappa, encdec_kappa])
         if self.head_weight_loss == "half":
             crit = torch.ones_like(all_kappa) * 0.5
