@@ -297,16 +297,15 @@ class PickyTransformerEncoderLayer(modules.Module):
     def reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.self_attention.reinit_heads(heads)
-            if recover_weights:
-                with torch.no_grad():
-                    self.kappa.zero_()
-            else:
-                self.reinit_kappa(heads)
+        if recover_weights:
+            with torch.no_grad():
+                self.kappa.zero_()
+        else:
+            self.reinit_kappa(heads)
 
     def reinit_dim(self, index, recover_weights=False):
-        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
-            return
-        self.feed_forward.reinit_dim(index)
+        if len(index["input"]) > 0 or len(index["inter"]) > 0 or len(index["output"]) > 0:
+            self.feed_forward.reinit_dim(index)
         if self.ffn_weights:
             if recover_weights:
                 with torch.no_grad():
@@ -441,25 +440,24 @@ class PickyTransformerDecoderLayer(modules.Module):
     def self_reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.self_attention.reinit_heads(heads)
-            if recover_weights:
-                with torch.no_grad():
-                    self.self_kappa.zero_()
-            else:
-                self.reinit_self_kappa(heads)
+        if recover_weights:
+            with torch.no_grad():
+                self.self_kappa.zero_()
+        else:
+            self.reinit_self_kappa(heads)
 
     def encdec_reinit_heads(self, heads, recover_weights=False):
         if len(heads) > 0:
             self.encdec_attention.reinit_heads(heads)
-            if recover_weights:
-                with torch.no_grad():
-                    self.encdec_kappa.zero_()
-            else:
-                self.reinit_encdec_kappa(heads)
+        if recover_weights:
+            with torch.no_grad():
+                self.encdec_kappa.zero_()
+        else:
+            self.reinit_encdec_kappa(heads)
 
     def reinit_dim(self, index, recover_weights=False):
-        if len(index["input"]) == 0 and len(index["inter"]) == 0 and len(index["output"]) == 0:
-            return
-        self.feed_forward.reinit_dim(index)
+        if len(index["input"]) > 0 or len(index["inter"]) > 0 or len(index["output"]) > 0:
+            self.feed_forward.reinit_dim(index)
         if self.ffn_weights:
             if recover_weights:
                 with torch.no_grad():
