@@ -579,7 +579,10 @@ def main(args):
 
     if args.checkpoint is not None:
         # Load pre-trained models
-        state = torch.load(args.checkpoint, map_location="cpu")
+        if os.path.isdir(args.checkpoint):
+            state = torch.load(utils.latest_checkpoint(args.checkpoint), map_location="cpu")
+        else:
+            state = torch.load(args.checkpoint, map_location="cpu")
         missing_keys, unexpected_keys = model.load_state_dict(state["model"], strict=False)
         if len(missing_keys) > 0:
             if dist.get_rank() == 0:
