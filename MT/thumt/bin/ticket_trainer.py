@@ -65,6 +65,8 @@ def parse_args(args=None):
                         help="proportion of model to reinitialize per time")
     parser.add_argument("--recover_weights", action="store_true",
                         help="Recover weights when reinitialize.")
+    parser.add_argument("--layerwise", action="store_true",
+                        help="Reinitialize heads layerwise")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -609,6 +611,8 @@ def main(args):
     trainable_parameters = [list(model.named_parameters())[i] for i, flag in enumerate(trainable_flags) if flag]
     trainable_masks = [torch.ones_like(param[1]).bool() for param in trainable_parameters]
 
+    binary_masks = []
+
     while True:
         start_time = time.time()
 
@@ -648,16 +652,26 @@ def main(args):
 
                 if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
                     elapsed = time.time() - start_time
+
+                    heads_to_reinit = model.find_pruneable_heads(args.reinit_p, layerwise=args.layerwise)
+                    binary_mask = model.get_binary_head_mask(heads_to_reinit)
+                    if len(binary_masks) > 0:
+                        mask_difference = (binary_masks[-1] - binary_mask).abs().sum()
+                    else:
+                        mask_difference = binary_mask.size(0)
+                    binary_masks.append(binary_mask)
+
                     if True in trainable_flags and step < params.train_steps:
                         if type(optimizer._optimizer._learning_rate) == float:
                             lr = optimizer._optimizer._learning_rate
                         else:
                             lr = optimizer._optimizer._learning_rate(step)
                         print('| epoch {:2d} | step {:17d} | lr {:02.2e} | '
-                              'ms/step {:4.0f} | loss {:8.4f} '.format(
+                                'ms/step {:4.0f} | loss {:8.4f} | mask diff {:2d} '.format(
                             epoch + 1, step, lr,
                             elapsed * 1000 / args.log_interval, 
-                            loss.item()))
+                            loss.item(),
+                            mask_difference))
                     if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
                         if type(additional_optimizer._optimizer._learning_rate) == float:
                             additional_lr = additional_optimizer._optimizer._learning_rate
@@ -668,6 +682,7 @@ def main(args):
                             epoch + 1, additional_step, additional_lr,
                             elapsed * 1000 / args.log_interval, 
                             loss.item()))
+
                     start_time = time.time()
 
                 if step >= max(params.train_steps, params.additional_start_step + params.additional_train_steps):
@@ -694,13 +709,14 @@ def main(args):
 
                 if step % params.reinit_steps == 0:
                     if model.name == "picky_transformer":
-                        heads_to_reinit = model.find_pruneable_heads(args.reinit_p)
+                        heads_to_reinit = model.find_pruneable_heads(args.reinit_p, layerwise=args.layerwise)
                         indexes_to_reinit = model.find_pruneable_dim(heads_to_reinit)
                         model.reinitialize_heads_and_dims(heads_to_reinit, indexes_to_reinit, recover_weights=args.recover_weights)
                         if dist.get_rank() == 0:
                             print("Reinitialized Heads: ")
                             pprint(heads_to_reinit)
                         trainable_masks = model.get_trainable_masks(trainable_parameters, heads_to_reinit, indexes_to_reinit)
+
 
         epoch += 1
 

@@ -712,7 +712,30 @@ class PickyTransformer(modules.Module):
                          }
         return heads_to_prune
 
-    def find_pruneable_heads(self, p, random=False):
+    def get_binary_head_mask(self, heads_to_prune):
+        binary_mask = []
+        for num_layer, layer in enumerate(self.encoder.layers):
+            for num_head, k in enumerate(layer.kappa):
+                if num_head in heads_to_prune["encoder"][num_layer]:
+                    binary_mask.append(1)
+                else:
+                    binary_mask.append(0)
+
+        for num_layer, layer in enumerate(self.decoder.layers):
+            for num_head, k in enumerate(layer.self_kappa):
+                if num_head in heads_to_prune["decoder"][num_layer]:
+                    binary_mask.append(1)
+                else:
+                    binary_mask.append(0)
+            for num_head, k in enumerate(layer.encdec_kappa):
+                if num_head in heads_to_prune["encdec"][num_layer]:
+                    binary_mask.append(1)
+                else:
+                    binary_mask.append(0)
+        
+        return torch.Tensor(binary_mask).long()
+
+    def find_pruneable_heads(self, p, random=False, layerwise=False):
         with torch.no_grad():
             heads_to_prune = {
                     "encoder": {layer: [] for layer, _ in enumerate(self.encoder.layers)},
@@ -759,6 +782,27 @@ class PickyTransformer(modules.Module):
 
                 return heads_to_prune
 
+            if layerwise:
+                for num_layer, layer in enumerate(self.encoder.layers):
+                    num_heads_to_prune = math.floor(p * layer.kappa.size(0))
+                    threshold = layer.kappa.sort()[0][num_heads_to_prune].item()
+                    for num_head, k in enumerate(layer.kappa):
+                        if k.item() < threshold:
+                            heads_to_prune["encoder"][num_layer].append(num_head)
+
+                for num_layer, layer in enumerate(self.decoder.layers):
+                    num_heads_to_prune = math.floor(p * layer.self_kappa.size(0))
+                    threshold = layer.self_kappa.sort()[0][num_heads_to_prune].item()
+                    for num_head, k in enumerate(layer.self_kappa):
+                        if k.item() < threshold:
+                            heads_to_prune["decoder"][num_layer].append(num_head)
+                    num_heads_to_prune = math.floor(p * layer.encdec_kappa.size(0))
+                    threshold = layer.encdec_kappa.sort()[0][num_heads_to_prune].item()
+                    for num_head, k in enumerate(layer.encdec_kappa):
+                        if k.item() < threshold:
+                            heads_to_prune["encdec"][num_layer].append(num_head)
+
+                return heads_to_prune
 
             num_heads_to_prune = math.floor(p * all_kappa.size(0))
             threshold = all_kappa.sort()[0][num_heads_to_prune].item()
