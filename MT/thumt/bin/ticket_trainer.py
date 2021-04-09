@@ -67,6 +67,8 @@ def parse_args(args=None):
                         help="Recover weights when reinitialize.")
     parser.add_argument("--layerwise", action="store_true",
                         help="Reinitialize heads layerwise")
+    parser.add_argument("--mask_common", type=int, default=5,
+                        help="common choices in recent masks")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -103,6 +105,7 @@ def default_params():
         update_cycle=1,
         device_list=[0],
         initial_step=0,
+        start_step=0,
         warmup_steps=0,
         train_steps=20000,
         optimizer="Adam",
@@ -487,6 +490,13 @@ def prune_model(model, json_file):
             heads_to_prune = json.load(fp_json)
         model.prune_heads(heads_to_prune)
 
+def compute_common_score(compare_list):
+    score_tensor = torch.zeros_like(compare_list[0]).bool()
+    for i in range(len(compare_list) - 1):
+        temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
+        score_tensor = torch.logical_or(score_tensor, temp_score)
+    return score_tensor.eq(False).sum().item()
+
 
 def main(args):
     model_cls = models.get_model(args.model)
@@ -629,7 +639,7 @@ def main(args):
             loss = train_fn(features)
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
-            if True in trainable_flags and step < params.train_steps:
+            if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps:
                 grads_and_vars = exclude_variables(
                     trainable_flags,
                     zip(gradients, list(model.named_parameters())))
@@ -659,6 +669,13 @@ def main(args):
                         mask_difference = (binary_masks[-1] - binary_mask).abs().sum()
                     else:
                         mask_difference = binary_mask.size(0)
+                    if args.mask_common > 0:
+                        if len(binary_masks) >= args.mask_common:
+                            compare_list = binary_masks[-args.mask_common:]
+                            compare_list.append(binary_mask)
+                            common_score = compute_common_score(compare_list)
+                        else:
+                            common_score = 0
                     binary_masks.append(binary_mask)
 
                     if True in trainable_flags and step < params.train_steps:
@@ -667,11 +684,12 @@ def main(args):
                         else:
                             lr = optimizer._optimizer._learning_rate(step)
                         print('| epoch {:2d} | step {:17d} | lr {:02.2e} | '
-                                'ms/step {:4.0f} | loss {:8.4f} | mask diff {:2d} '.format(
+                                'ms/step {:4.0f} | loss {:8.4f} | mask diff {:2d} | common {} {:2d} '.format(
                             epoch + 1, step, lr,
                             elapsed * 1000 / args.log_interval, 
                             loss.item(),
-                            mask_difference))
+                            mask_difference,
+                            args.mask_common, common_score))
                     if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
                         if type(additional_optimizer._optimizer._learning_rate) == float:
                             additional_lr = additional_optimizer._optimizer._learning_rate

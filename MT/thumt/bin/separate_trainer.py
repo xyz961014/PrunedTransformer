@@ -113,6 +113,7 @@ def default_params():
         update_cycle=1,
         device_list=[0],
         initial_step=0,
+        start_step=0,
         warmup_steps=4000,
         train_steps=100000,
         optimizer="Adam",
@@ -702,7 +703,7 @@ def main(args):
             loss = train_fn(features)
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
-            if True in trainable_flags and step < params.train_steps:
+            if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps:
                 grads_and_vars = exclude_variables(
                     trainable_flags,
                     zip(gradients, list(model.named_parameters())))
