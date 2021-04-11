@@ -34,7 +34,8 @@ class PickyAttentionSubLayer(modules.Module):
                                                              params.head_size,
                                                              params.num_heads, 
                                                              params.attention_dropout,
-                                                             params.weight_function)
+                                                             params.weight_function,
+                                                             params.fake_weight)
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
             if self.has_residual_transform:
@@ -139,7 +140,8 @@ class PickyFFNSubLayer(modules.Module):
             self.ffn_layer = modules.PickyFeedForward(params.hidden_size,
                                                       params.filter_size,
                                                       dropout=params.relu_dropout,
-                                                      weight_function=params.weight_function)
+                                                      weight_function=params.weight_function,
+                                                      fake_weight=params.fake_weight)
             self.layer_norm = modules.FitLayerNorm(params.hidden_size)
 
             if self.thin_output:
@@ -1212,6 +1214,7 @@ class PickyTransformer(modules.Module):
             thin_ffn=True,
             head_weight_loss="none",
             head_weight_loss_weight=0.1,
+            fake_weight=False,
             # Override default parameters
             warmup_steps=4000,
             train_steps=100000,

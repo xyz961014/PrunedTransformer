@@ -234,7 +234,7 @@ class MoEFeedForward(Module):
 class PickyFeedForward(Module):
 
     def __init__(self, input_size, hidden_size, output_size=None, dropout=0.0,
-                 weight_function="sigmoid",
+                 weight_function="sigmoid", fake_weight=False,
                  name="feed_forward"):
         super(PickyFeedForward, self).__init__(name=name)
 
@@ -246,9 +246,16 @@ class PickyFeedForward(Module):
         self.additional_params = {}
 
         if weight_function == "sigmoid":
-            self.compute_weight = torch.sigmoid
+            if fake_weight:
+                self.compute_weight = lambda x: torch.sigmoid(x) - torch.sigmoid(x).detach() + torch.ones_like(x)
+            else:
+                self.compute_weight = torch.sigmoid
         elif weight_function == "softmax":
-            self.compute_weight = lambda x: F.softmax(x, dim=0)
+            if fake_weight:
+                self.compute_weight = lambda x: F.softmax(x, 0) - F.softmax(x, 0).detach() + torch.ones_like(x)
+            else:
+                self.compute_weight = lambda x: F.softmax(x, dim=0)
+
 
         with utils.scope(name):
             self.input_transform = Affine(input_size, hidden_size,

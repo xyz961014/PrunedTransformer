@@ -31,3 +31,11 @@ def dim_dropout(x, p=0.5, training=True, dim=0):
     mask = mask.div_(1 - p)
     mask = mask.expand_as(x)
     return x * mask
+
+def compute_common_score(compare_list):
+    score_tensor = torch.zeros_like(compare_list[0]).bool()
+    for i in range(len(compare_list) - 1):
+        temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
+        score_tensor = torch.logical_or(score_tensor, temp_score)
+    return score_tensor.eq(False).sum().item()
+

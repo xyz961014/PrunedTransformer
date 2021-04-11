@@ -1040,7 +1040,7 @@ class HeadWiseMultiHeadAttention(MultiHeadAttentionBase):
 class PickyMultiHeadAttention(MultiHeadAttentionBase):
 
     def __init__(self, hidden_size, head_size, num_heads, dropout=0.0,
-                 weight_function="sigmoid",
+                 weight_function="sigmoid", fake_weight=False,
                  name="multihead_attention"):
         super(PickyMultiHeadAttention, self).__init__(name=name)
 
@@ -1056,9 +1056,15 @@ class PickyMultiHeadAttention(MultiHeadAttentionBase):
         self.additional_params = {}
 
         if weight_function == "sigmoid":
-            self.compute_weight = torch.sigmoid
+            if fake_weight:
+                self.compute_weight = lambda x: torch.sigmoid(x) - torch.sigmoid(x).detach() + torch.ones_like(x)
+            else:
+                self.compute_weight = torch.sigmoid
         elif weight_function == "softmax":
-            self.compute_weight = lambda x: F.softmax(x, dim=0)
+            if fake_weight:
+                self.compute_weight = lambda x: F.softmax(x, 0) - F.softmax(x, 0).detach() + torch.ones_like(x)
+            else:
+                self.compute_weight = lambda x: F.softmax(x, dim=0)
 
         with utils.scope(name):
             self.q_transform = Affine(hidden_size, attention_hidden_size,

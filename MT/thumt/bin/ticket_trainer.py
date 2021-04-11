@@ -490,13 +490,6 @@ def prune_model(model, json_file):
             heads_to_prune = json.load(fp_json)
         model.prune_heads(heads_to_prune)
 
-def compute_common_score(compare_list):
-    score_tensor = torch.zeros_like(compare_list[0]).bool()
-    for i in range(len(compare_list) - 1):
-        temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
-        score_tensor = torch.logical_or(score_tensor, temp_score)
-    return score_tensor.eq(False).sum().item()
-
 
 def main(args):
     model_cls = models.get_model(args.model)
@@ -663,20 +656,6 @@ def main(args):
                 if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
                     elapsed = time.time() - start_time
 
-                    heads_to_reinit = model.find_pruneable_heads(args.reinit_p, layerwise=args.layerwise)
-                    binary_mask = model.get_binary_head_mask(heads_to_reinit)
-                    if len(binary_masks) > 0:
-                        mask_difference = (binary_masks[-1] - binary_mask).abs().sum()
-                    else:
-                        mask_difference = binary_mask.size(0)
-                    if args.mask_common > 0:
-                        if len(binary_masks) >= args.mask_common:
-                            compare_list = binary_masks[-args.mask_common:]
-                            compare_list.append(binary_mask)
-                            common_score = compute_common_score(compare_list)
-                        else:
-                            common_score = 0
-                    binary_masks.append(binary_mask)
 
                     if True in trainable_flags and step < params.train_steps:
                         if type(optimizer._optimizer._learning_rate) == float:
@@ -684,22 +663,37 @@ def main(args):
                         else:
                             lr = optimizer._optimizer._learning_rate(step)
                         print('| epoch {:2d} | step {:17d} | lr {:02.2e} | '
-                                'ms/step {:4.0f} | loss {:8.4f} | mask diff {:2d} | common {} {:2d} '.format(
+                                'ms/step {:4.0f} | loss {:8.4f} '.format(
                             epoch + 1, step, lr,
                             elapsed * 1000 / args.log_interval, 
-                            loss.item(),
-                            mask_difference,
-                            args.mask_common, common_score))
+                            loss.item()))
                     if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
+                        heads_to_reinit = model.find_pruneable_heads(args.reinit_p, layerwise=args.layerwise)
+                        binary_mask = model.get_binary_head_mask(heads_to_reinit)
+                        if len(binary_masks) > 0:
+                            mask_difference = (binary_masks[-1] - binary_mask).abs().sum()
+                        else:
+                            mask_difference = binary_mask.size(0)
+                        if args.mask_common > 0:
+                            if len(binary_masks) >= args.mask_common:
+                                compare_list = binary_masks[-args.mask_common:]
+                                compare_list.append(binary_mask)
+                                common_score = utils.compute_common_score(compare_list)
+                            else:
+                                common_score = 0
+                        binary_masks.append(binary_mask)
+
                         if type(additional_optimizer._optimizer._learning_rate) == float:
                             additional_lr = additional_optimizer._optimizer._learning_rate
                         else:
                             additional_lr = additional_optimizer._optimizer._learning_rate(additional_step)
                         print('| epoch {:2d} | additional step {:6d} | lr {:02.2e} | '
-                              'ms/step {:4.0f} | loss {:8.4f} '.format(
+                              'ms/step {:4.0f} | loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
                             epoch + 1, additional_step, additional_lr,
                             elapsed * 1000 / args.log_interval, 
-                            loss.item()))
+                            loss.item(),
+                            mask_difference,
+                            args.mask_common, common_score))
 
                     start_time = time.time()
 
