@@ -14,6 +14,7 @@ import re
 import six
 import json
 import socket
+import pickle
 import time
 import torch
 from pprint import pprint
@@ -339,7 +340,7 @@ def exclude_variables(flags, grads_and_vars):
     return zip(new_grads, new_vars)
 
 
-def save_checkpoint(step, additional_step, epoch, model, optimizer, params):
+def save_checkpoint(step, additional_step, epoch, model, optimizer, binary_masks, params):
     if dist.get_rank() == 0:
         state = {
             "step": step,
@@ -347,7 +348,7 @@ def save_checkpoint(step, additional_step, epoch, model, optimizer, params):
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
-            "pruned_heads": model.find_pruned_heads() if hasattr(model, "find_pruned_heads") else None
+            "pruned_heads": model.find_pruned_heads() if hasattr(model, "find_pruned_heads") else None,
         }
         utils.save(state, params.output, params.keep_checkpoint_max)
 
@@ -815,7 +816,10 @@ def main(args):
                     start_time = time.time()
 
                 if step % params.save_checkpoint_steps == 0:
-                    save_checkpoint(step, additional_step, epoch, model, optimizer, params)
+                    save_checkpoint(step, additional_step, epoch, model, optimizer, binary_masks, params)
+                    pickle.dump([((i + 1) * args.log_interval, mask.cpu()) 
+                                 for i, mask in enumerate(binary_masks)], 
+                                open(os.path.join(params.output, "masks.pkl"), "wb"))
                     start_time = time.time()
 
         epoch += 1
