@@ -732,7 +732,7 @@ def main(args):
 
                 if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
                     elapsed = time.time() - start_time
-                    if True in trainable_flags and step < params.train_steps:
+                    if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps:
                         if type(optimizer._optimizer._learning_rate) == float:
                             lr = optimizer._optimizer._learning_rate
                         else:
