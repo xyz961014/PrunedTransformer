@@ -777,7 +777,7 @@ def main(args):
                 if step >= max(params.train_steps, params.additional_start_step + params.additional_train_steps):
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
-                    save_checkpoint(step, additional_step, epoch, model, optimizer, params)
+                    save_checkpoint(step, additional_step, epoch, model, optimizer, binary_masks, params)
 
                     if dist.get_rank() == 0:
                         summary.close()
