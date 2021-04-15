@@ -838,6 +838,7 @@ class PickyTransformer(modules.Module):
 
             for layer_num, heads in heads_to_prune["encoder"].items():
                 if len(heads) > 0:
+                    layer_num = int(layer_num)
                     layer = self.encoder.layers[layer_num]
                     if self.ffn_weights:
                         ffn_input_weight = layer.ffn_input_weight
@@ -881,6 +882,7 @@ class PickyTransformer(modules.Module):
 
             for layer_num, heads in heads_to_prune["encdec"].items():
                 if len(heads) > 0:
+                    layer_num = int(layer_num)
                     layer = self.decoder.layers[layer_num]
                     if self.ffn_weights:
                         ffn_input_weight = layer.ffn_input_weight

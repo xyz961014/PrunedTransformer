@@ -495,11 +495,15 @@ def load_references(pattern):
 
     return list(zip(*references))
 
-def prune_model(model, json_file):
+def prune_model(model, optimizer, additional_optimizer, json_file):
     if json_file and os.path.exists(json_file):
         with open(json_file) as fp_json:
             heads_to_prune = json.load(fp_json)
+        indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+        optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+        additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
         model.prune_heads(heads_to_prune)
+        model.prune_dim(indexes_to_prune)
 
 
 def main(args):
@@ -602,7 +606,7 @@ def main(args):
                     print(key)
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
-        prune_model(model, args.prune_json)
+        prune_model(model, optimizer, additional_optimizer, args.prune_json)
         if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
@@ -619,9 +623,11 @@ def main(args):
                 if dist.get_rank() == 0:
                     print("Pruned Heads:")
                     pprint(heads_to_prune)
+                    with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                        json.dump(heads_to_prune, fp)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
-            print_variables(model, params.pattern, dist.get_rank() == 0)
+                print_variables(model, params.pattern, dist.get_rank() == 0)
         step = params.initial_step
         additional_step = params.additional_initial_step
         epoch = 0
@@ -631,11 +637,13 @@ def main(args):
         step = state["step"]
         additional_step = state["additional_step"]
         epoch = state["epoch"]
-        model.load_state_dict(state["model"])
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
-        prune_model(model, args.prune_json)
-        if args.dim_prune_prob and args.dim_prune_interval == 0:
+        if not args.prune_json:
+            args.prune_json = os.path.join(params.output, "heads_to_prune.json")
+        prune_model(model, optimizer, additional_optimizer, args.prune_json)
+        model.load_state_dict(state["model"])
+        if args.dim_prune_prob and args.dim_prune_interval == 0 and step == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
             elif model.name == "picky_transformer":
@@ -651,6 +659,8 @@ def main(args):
                 if dist.get_rank() == 0:
                     print("Pruned Heads:")
                     pprint(heads_to_prune)
+                    with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                        json.dump(heads_to_prune, fp)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
             print_variables(model, params.pattern, dist.get_rank() == 0)
@@ -663,7 +673,7 @@ def main(args):
         epoch = 0
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
-        prune_model(model, args.prune_json)
+        prune_model(model, optimizer, additional_optimizer, args.prune_json)
         if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
@@ -680,9 +690,11 @@ def main(args):
                 if dist.get_rank() == 0:
                     print("Pruned Heads:")
                     pprint(heads_to_prune)
+                    with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                        json.dump(heads_to_prune, fp)
             if dist.get_rank() == 0:
                 print("Model params after dim prune")
-            print_variables(model, params.pattern, dist.get_rank() == 0)
+                print_variables(model, params.pattern, dist.get_rank() == 0)
         broadcast(model)
 
     def train_fn(inputs):
@@ -801,10 +813,14 @@ def main(args):
                         additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
                         model.prune_heads(heads_to_prune)
                         model.prune_dim(indexes_to_prune)
-                        print("Pruned Heads:")
-                        pprint(heads_to_prune)
-                    print("Model params after prune")
-                    print_variables(model, params.pattern, dist.get_rank() == 0)
+                        if dist.get_rank() == 0:
+                            print("Pruned Heads:")
+                            pprint(heads_to_prune)
+                            with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                                json.dump(heads_to_prune, fp)
+                    if dist.get_rank() == 0:
+                        print("Model params after prune")
+                        print_variables(model, params.pattern, dist.get_rank() == 0)
 
 
                 if step % params.eval_steps == 0:
