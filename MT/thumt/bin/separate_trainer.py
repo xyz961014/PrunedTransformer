@@ -803,7 +803,7 @@ def main(args):
 
                     start_time = time.time()
 
-                if check_mask and check_step < params.check_mask_steps:
+                if check_mask and check_step < params.check_mask_steps and disk.get_rank() == 0:
                     heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
                     binary_mask = model.get_binary_head_mask(heads_to_prune)
                     if len(binary_masks) > 0 and binary_masks[-1].size(0) == binary_mask.size(0):
