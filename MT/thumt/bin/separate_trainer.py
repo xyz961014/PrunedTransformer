@@ -886,8 +886,6 @@ def main(args):
                 if check_step > 0 and check_step == params.check_mask_steps:
                     check_step = 0
                     check_mask = False
-                    utils.evaluate(model, sorted_key, eval_dataset,
-                                   params.output, references, params)
                     # check mask and save
                     heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
                     binary_mask = model.get_binary_head_mask(heads_to_prune)
@@ -903,9 +901,14 @@ def main(args):
                         else:
                             common_score = 0
                     check_binary_masks.append(binary_mask)
+                    print("-" * 50)
+                    print('| check mask diff {:2d} | common {} {:2d}'.format(
+                        mask_difference, args.mask_common, common_score))
                     pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
                                  for i, mask in enumerate(check_binary_masks)], 
                                 open(os.path.join(params.output, "check_masks.pkl"), "wb"))
+                    utils.evaluate(model, sorted_key, eval_dataset,
+                                   params.output, references, params)
 
 
                 if not check_mask and step % params.save_checkpoint_steps == 0:
