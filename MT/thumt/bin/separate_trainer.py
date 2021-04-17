@@ -825,9 +825,8 @@ def main(args):
                         additional_lr = additional_optimizer._optimizer._learning_rate(additional_step)
 
                     print('| epoch {:2d} | check mask step {:3d} | lr {:02.2e} | '
-                          'ms/step {:3.0f} | loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
+                          'loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
                         epoch + 1, check_step, additional_lr,
-                        elapsed * 1000, 
                         loss.item(),
                         mask_difference,
                         args.mask_common, common_score))
