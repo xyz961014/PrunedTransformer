@@ -166,6 +166,7 @@ def default_params():
         save_checkpoint_steps=1000,
         # Validation
         eval_steps=2000,
+        check_mask_steps=200,
         eval_secs=0,
         top_beams=1,
         beam_size=4,
@@ -705,15 +706,22 @@ def main(args):
     counter = 0
     binary_masks = []
 
+    check_binary_masks = []
+    check_mask = False
+    check_step = 0
+
     while True:
         start_time = time.time()
 
         for features in dataset:
             if counter % params.update_cycle == 0:
-                step += 1
-                utils.set_global_step(step)
-                if step > params.additional_start_step:
-                    additional_step += 1
+                if not check_mask:
+                    step += 1
+                    utils.set_global_step(step)
+                    if step > params.additional_start_step:
+                        additional_step += 1
+                else:
+                    check_step += 1
 
             counter += 1
             t = time.time()
@@ -721,13 +729,22 @@ def main(args):
             loss = train_fn(features)
             gradients = optimizer.compute_gradients(loss,
                                                     list(model.parameters()))
-            if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps:
+
+            if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps and not check_mask:
                 grads_and_vars = exclude_variables(
                     trainable_flags,
                     zip(gradients, list(model.named_parameters())))
                 optimizer.apply_gradients(grads_and_vars)
-            if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
+
+            if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps and not check_mask:
                 # update grads for additional optimizer
+                additional_grads_and_vars = exclude_variables(
+                    additional_flags,
+                    zip(gradients, list(model.named_parameters())))
+                additional_optimizer.apply_gradients(additional_grads_and_vars)
+
+            # check mask 
+            if True in additional_flags and check_mask and check_step < params.check_mask_steps:
                 additional_grads_and_vars = exclude_variables(
                     additional_flags,
                     zip(gradients, list(model.named_parameters())))
@@ -744,7 +761,7 @@ def main(args):
 
                 if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
                     elapsed = time.time() - start_time
-                    if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps:
+                    if True in trainable_flags and params.start_step < step < params.start_step + params.train_steps and not check_mask:
                         if type(optimizer._optimizer._learning_rate) == float:
                             lr = optimizer._optimizer._learning_rate
                         else:
@@ -754,7 +771,7 @@ def main(args):
                             epoch + 1, step, lr,
                             elapsed * 1000 / args.log_interval, 
                             loss.item()))
-                    if True in additional_flags and params.additional_start_step < step < params.additional_start_step + params.additional_train_steps:
+                    if True in additional_flags and (params.additional_start_step < step < params.additional_start_step + params.additional_train_steps and not check_mask):
 
                         heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
                         binary_mask = model.get_binary_head_mask(heads_to_prune)
@@ -786,7 +803,38 @@ def main(args):
 
                     start_time = time.time()
 
-                if step >= max(params.train_steps, params.additional_start_step + params.additional_train_steps):
+                if check_mask and check_step < params.check_mask_steps:
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
+                    binary_mask = model.get_binary_head_mask(heads_to_prune)
+                    if len(binary_masks) > 0 and binary_masks[-1].size(0) == binary_mask.size(0):
+                        mask_difference = (binary_masks[-1] - binary_mask).abs().sum()
+                    else:
+                        mask_difference = binary_mask.size(0)
+                    if args.mask_common > 0:
+                        if len(binary_masks) >= args.mask_common and binary_masks[-args.mask_common].size(0) == binary_mask.size(0):
+                            compare_list = binary_masks[-args.mask_common:]
+                            compare_list.append(binary_mask)
+                            common_score = utils.compute_common_score(compare_list)
+                        else:
+                            common_score = 0
+                    binary_masks.append(binary_mask)
+
+                    if type(additional_optimizer._optimizer._learning_rate) == float:
+                        additional_lr = additional_optimizer._optimizer._learning_rate
+                    else:
+                        additional_lr = additional_optimizer._optimizer._learning_rate(additional_step)
+
+                    print('| epoch {:2d} | check mask step {:3d} | lr {:02.2e} | '
+                          'ms/step {:3.0f} | loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
+                        epoch + 1, check_step, additional_lr,
+                        elapsed * 1000, 
+                        loss.item(),
+                        mask_difference,
+                        args.mask_common, common_score))
+
+
+
+                if step >= max(params.start_step + params.train_steps, params.additional_start_step + params.additional_train_steps):
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
                     save_checkpoint(step, additional_step, epoch, model, optimizer, binary_masks, params)
@@ -796,7 +844,7 @@ def main(args):
 
                     return
 
-                if (args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps:
+                if not check_mask and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
                     if model.name == "fit_transformer":
                         index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
                         if index_len:
@@ -823,15 +871,44 @@ def main(args):
                         print_variables(model, params.pattern, dist.get_rank() == 0)
 
 
-                if step % params.eval_steps == 0:
+                if not check_mask and step % params.eval_steps == 0:
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
 
                     if args.display_weights:
                         model.display_weights(step)
-                    start_time = time.time()
+                    if params.check_mask_steps > 0:
+                        model.reinit_kappa_and_ffn_weights()
+                        check_mask = True
 
-                if step % params.save_checkpoint_steps == 0:
+                    start_time = time.time()
+                
+                if check_step > 0 and check_step == params.check_mask_steps:
+                    check_step = 0
+                    check_mask = False
+                    utils.evaluate(model, sorted_key, eval_dataset,
+                                   params.output, references, params)
+                    # check mask and save
+                    heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
+                    binary_mask = model.get_binary_head_mask(heads_to_prune)
+                    if len(check_binary_masks) > 0 and check_binary_masks[-1].size(0) == binary_mask.size(0):
+                        mask_difference = (check_binary_masks[-1] - binary_mask).abs().sum()
+                    else:
+                        mask_difference = binary_mask.size(0)
+                    if args.mask_common > 0:
+                        if len(check_binary_masks) >= args.mask_common and check_binary_masks[-args.mask_common].size(0) == binary_mask.size(0):
+                            compare_list = check_binary_masks[-args.mask_common:]
+                            compare_list.append(binary_mask)
+                            common_score = utils.compute_common_score(compare_list)
+                        else:
+                            common_score = 0
+                    check_binary_masks.append(binary_mask)
+                    pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
+                                 for i, mask in enumerate(check_binary_masks)], 
+                                open(os.path.join(params.output, "check_masks.pkl"), "wb"))
+
+
+                if not check_mask and step % params.save_checkpoint_steps == 0:
                     save_checkpoint(step, additional_step, epoch, model, optimizer, binary_masks, params)
                     pickle.dump([((i + 1) * args.log_interval, mask.cpu()) 
                                  for i, mask in enumerate(binary_masks)], 
