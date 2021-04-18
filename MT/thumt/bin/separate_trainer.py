@@ -166,7 +166,7 @@ def default_params():
         save_checkpoint_steps=1000,
         # Validation
         eval_steps=2000,
-        check_mask_steps=200,
+        check_mask_steps=0,
         eval_secs=0,
         top_beams=1,
         beam_size=4,
