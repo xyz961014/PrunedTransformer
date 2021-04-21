@@ -80,6 +80,8 @@ def parse_args(args=None):
                         help="random prune heads")
     parser.add_argument("--layerwise", action="store_true",
                         help="Prune heads layerwise")
+    parser.add_argument("--check_and_prune", action="store_true",
+                        help="prune heads after check mask")
     parser.add_argument("--mask_common", type=int, default=5,
                         help="common choices in recent masks")
 
@@ -712,6 +714,7 @@ def main(args):
 
     while True:
         start_time = time.time()
+        global_start_time = time.time()
 
         for features in dataset:
             if counter % params.update_cycle == 0:
@@ -843,16 +846,8 @@ def main(args):
 
                     return
 
-                if not check_mask and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
-                    if model.name == "fit_transformer":
-                        index_len = round((1 - args.dim_prune_prob) * model.hidden_size)
-                        if index_len:
-                            index = torch.ones(model.hidden_size).multinomial(index_len)
-                            index = index.sort()[0]
-                        model.prune_dim(index=index)
-                        optimizer.prune_dim(index, model.named_parameters())
-                        additional_optimizer.prune_dim(index, model.named_parameters())
-                    elif model.name == "picky_transformer":
+                if not check_mask and not args.check_and_prune and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
+                    if model.name == "picky_transformer":
                         heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, random=args.random_prune,
                                                                     layerwise=args.layerwise)
                         indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
@@ -871,6 +866,8 @@ def main(args):
 
 
                 if not check_mask and step % params.eval_steps == 0:
+                    training_time = time.time() - global_start_time
+                    utils.set_global_time(training_time)
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
 
@@ -906,8 +903,20 @@ def main(args):
                     pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
                                  for i, mask in enumerate(check_binary_masks)], 
                                 open(os.path.join(params.output, "check_masks.pkl"), "wb"))
-                    utils.evaluate(model, sorted_key, eval_dataset,
-                                   params.output, references, params)
+                    if args.check_and_prune and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
+                        indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                        optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        model.prune_heads(heads_to_prune)
+                        model.prune_dim(indexes_to_prune)
+                        if dist.get_rank() == 0:
+                            print("Pruned Heads:")
+                            pprint(heads_to_prune)
+                            with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                                json.dump(heads_to_prune, fp)
+                        if dist.get_rank() == 0:
+                            print("Model params after prune")
+                        print_variables(model, params.pattern, dist.get_rank() == 0)
 
 
                 if not check_mask and step % params.save_checkpoint_steps == 0:

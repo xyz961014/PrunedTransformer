@@ -11,6 +11,7 @@ import operator
 import os
 import shutil
 import time
+import math
 import torch
 
 import torch.distributed as dist
@@ -20,7 +21,7 @@ from thumt.utils.checkpoint import save, latest_checkpoint
 from thumt.utils.inference import beam_search
 from thumt.utils.bleu import bleu
 from thumt.utils.bpe import BPE
-from thumt.utils.misc import get_global_step
+from thumt.utils.misc import get_global_step, get_global_time
 from thumt.utils.summary import scalar
 
 from tqdm import tqdm
@@ -231,6 +232,7 @@ def evaluate(model, sorted_key, dataset, base_dir, references, params):
 
     # Do validation here
     global_step = get_global_step()
+    global_time = get_global_time()
 
     if dist.get_rank() == 0:
         print("-" * 90)
@@ -240,7 +242,8 @@ def evaluate(model, sorted_key, dataset, base_dir, references, params):
 
     # Save records
     if dist.get_rank() == 0:
-        scalar("BLEU/score", score, global_step, write_every_n_steps=1)
+        scalar("BLEU/score - step", score, global_step, write_every_n_steps=1)
+        scalar("BLEU/score - time", score, math.floor(global_time), write_every_n_steps=1)
         print("BLEU at step %d: %f" % (global_step, score))
 
         # Save checkpoint to save_path

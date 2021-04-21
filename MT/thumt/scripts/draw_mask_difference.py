@@ -34,6 +34,8 @@ def parse_args():
 
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to trained checkpoints.")
+    parser.add_argument("--common_n", type=int, default=5,
+                        help="stat common heads in n checkpoint")
     parser.add_argument("--env", type=str, default="",
                         help="env for visdom")
 
@@ -50,6 +52,28 @@ def compute_distance_matrix(masks):
         for j in range(length):
             distance_matrix[i, j] = compute_mask_distance(masks[i][1], masks[j][1])
     return distance_matrix
+
+def compute_mask_difference(masks, i):
+    if i == 0:
+        return 1
+    
+    mask_prev = masks[i-1][1]
+    mask = masks[i][1]
+    return compute_mask_distance(mask_prev, mask)
+
+def compute_common_n_value(masks, n, i):
+    if i + 1 < n:
+        return 0
+    compare_list = [m[1] for m in masks[i+1-n:i+1]]
+    return compute_common_score(compare_list)
+
+def compute_common_score(compare_list):
+    score_tensor = torch.zeros_like(compare_list[0]).bool()
+    for i in range(len(compare_list) - 1):
+        temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
+        score_tensor = torch.logical_or(score_tensor, temp_score)
+    return score_tensor.eq(False).sum().item()
+
 
 def main(args):
 
@@ -69,9 +93,26 @@ def main(args):
             "title": "Visualization of mask distance matrix",
             "columnnames": [m[0] for m in masks],
             "rownames": [m[0] for m in masks],
-            
            }
     vis.heatmap(distance_matrix, opts=opts)
+
+    steps = np.array([m[0] for m in masks])
+    mask_diffs = np.array([compute_mask_difference(masks, i) for i in range(len(masks))])
+    common_n_values = np.array([compute_common_n_value(masks, args.common_n, i) for i in range(len(masks))])
+
+    opts_diff = {
+            "title": "Neighbor mask differences",
+            "xlabel": "Steps",
+            "ylabel": "Score"
+           }
+    opts_common = {
+            "title": "recent {} masks shared heads".format(args.common_n),
+            "xlabel": "Steps",
+            "ylabel": "Heads"
+           }
+    vis.line(mask_diffs[1:], steps[1:], opts=opts_diff)
+    vis.line(common_n_values[args.common_n:], steps[args.common_n:], opts=opts_common)
+    
 
 
 # Wrap main function
