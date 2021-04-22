@@ -827,12 +827,13 @@ def main(args):
                     else:
                         additional_lr = additional_optimizer._optimizer._learning_rate(additional_step)
 
-                    print('| epoch {:2d} | check mask step {:3d} | lr {:02.2e} | '
-                          'loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
-                        epoch + 1, check_step, additional_lr,
-                        loss.item(),
-                        mask_difference,
-                        args.mask_common, common_score))
+                    if check_step % args.log_interval == 0:
+                        print('| epoch {:2d} | check mask step {:3d} | lr {:02.2e} | '
+                              'loss {:8.4f} | mask diff {:2d} | common {} {:2d}'.format(
+                            epoch + 1, check_step, additional_lr,
+                            loss.item(),
+                            mask_difference,
+                            args.mask_common, common_score))
 
 
 
@@ -897,12 +898,13 @@ def main(args):
                         else:
                             common_score = 0
                     check_binary_masks.append(binary_mask)
-                    print("-" * 50)
-                    print('| check mask diff {:2d} | common {} {:2d}'.format(
-                        mask_difference, args.mask_common, common_score))
-                    pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
-                                 for i, mask in enumerate(check_binary_masks)], 
-                                open(os.path.join(params.output, "check_masks.pkl"), "wb"))
+                    if dist.get_rank() == 0:
+                        print("-" * 50)
+                        print('| check mask diff {:2d} | common {} {:2d}'.format(
+                            mask_difference, args.mask_common, common_score))
+                        pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
+                                     for i, mask in enumerate(check_binary_masks)], 
+                                    open(os.path.join(params.output, "check_masks.pkl"), "wb"))
                     if args.check_and_prune and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
                         indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                         optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
