@@ -17,6 +17,7 @@
 import csv
 import os
 import sys
+from tqdm import tqdm
 
 
 class InputExample(object):
@@ -234,7 +235,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in enumerate(examples):
+    for (ex_index, example) in tqdm(enumerate(examples), total=len(examples)):
         tokens_a = tokenizer.tokenize(example.text_a)
 
         tokens_b = None
