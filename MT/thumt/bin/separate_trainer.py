@@ -84,6 +84,8 @@ def parse_args(args=None):
                         help="prune heads after check mask")
     parser.add_argument("--mask_common", type=int, default=5,
                         help="common choices in recent masks")
+    parser.add_argument("--common_score_threshold", type=int, default=0,
+                        help="set > 0 use prune when common_score > threshold")
 
     # model and configuration
     parser.add_argument("--model", type=str, required=True,
@@ -864,6 +866,7 @@ def main(args):
                     if dist.get_rank() == 0:
                         print("Model params after prune")
                         print_variables(model, params.pattern, dist.get_rank() == 0)
+                        params.check_mask_steps = 0
 
 
                 if not check_mask and step % params.eval_steps == 0:
@@ -905,6 +908,14 @@ def main(args):
                         pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
                                      for i, mask in enumerate(check_binary_masks)], 
                                     open(os.path.join(params.output, "check_masks.pkl"), "wb"))
+                        if len(check_binary_masks) >= args.mask_common and check_binary_masks[-args.mask_common].size(0) == binary_mask.size(0):
+                            compare_list = check_binary_masks[-args.mask_common:]
+                            common_mask, _ = utils.choose_common_mask(compare_list, args.dim_prune_prob)
+                            print("common {} Heads:".format(args.mask_common))
+                            pprint(model.get_heads_from_mask(common_mask))
+                            print("pruned {} Heads:".format(args.mask_common))
+                            pprint(model.get_heads_from_mask(binary_mask.masked_fill(common_mask.eq(False), 0)))
+
                     if args.check_and_prune and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
                         indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
                         optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
@@ -919,6 +930,26 @@ def main(args):
                         if dist.get_rank() == 0:
                             print("Model params after prune")
                         print_variables(model, params.pattern, dist.get_rank() == 0)
+                        params.check_mask_steps = 0
+
+                    if common_score >= args.common_score_threshold > 0:
+                        # keep common choice and random pick the rest 
+                        common_mask, rest_random_mask = utils.choose_common_mask(compare_list, args.dim_prune_prob)
+                        heads_to_prune = model.get_heads_from_mask(rest_random_mask)
+                        indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
+                        optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        additional_optimizer.prune_heads_and_dims(heads_to_prune, indexes_to_prune, model)
+                        model.prune_heads(heads_to_prune)
+                        model.prune_dim(indexes_to_prune)
+                        if dist.get_rank() == 0:
+                            print("Pruned Heads:")
+                            pprint(heads_to_prune)
+                            with open(os.path.join(params.output, "heads_to_prune.json"), "w") as fp:
+                                json.dump(heads_to_prune, fp)
+                        if dist.get_rank() == 0:
+                            print("Model params after prune")
+                        print_variables(model, params.pattern, dist.get_rank() == 0)
+                        params.check_mask_steps = 0
 
 
                 if not check_mask and step % params.save_checkpoint_steps == 0:

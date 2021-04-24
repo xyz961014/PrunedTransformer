@@ -772,6 +772,32 @@ class PickyTransformer(modules.Module):
         
         return torch.Tensor(binary_mask).long()
 
+    def get_heads_from_mask(self, binary_mask):
+            heads_to_prune = {
+                    "encoder": {layer: [] for layer, _ in enumerate(self.encoder.layers)},
+                    "decoder": {layer: [] for layer, _ in enumerate(self.decoder.layers)},
+                    "encdec": {layer: [] for layer, _ in enumerate(self.decoder.layers)}
+                             }
+            ind = 0
+            for num_layer, layer in enumerate(self.encoder.layers):
+                for num_head, k in enumerate(layer.kappa):
+                    if binary_mask[ind]:
+                        heads_to_prune["encoder"][num_layer].append(num_head)
+                    ind += 1
+
+            for num_layer, layer in enumerate(self.decoder.layers):
+                for num_head, k in enumerate(layer.self_kappa):
+                    if binary_mask[ind]:
+                        heads_to_prune["decoder"][num_layer].append(num_head)
+                    ind += 1
+                for num_head, k in enumerate(layer.encdec_kappa):
+                    if binary_mask[ind]:
+                        heads_to_prune["encdec"][num_layer].append(num_head)
+                    ind += 1
+
+            return heads_to_prune
+
+
     def find_pruneable_heads(self, p, random=False, layerwise=False):
         with torch.no_grad():
             heads_to_prune = {

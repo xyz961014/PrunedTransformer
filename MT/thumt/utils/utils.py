@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import math
 
 def param_in(p, params):
     for param in params:
@@ -38,4 +39,27 @@ def compute_common_score(compare_list):
         temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
         score_tensor = torch.logical_or(score_tensor, temp_score)
     return score_tensor.eq(False).sum().item()
+
+def choose_common_mask(compare_list, prune_prob):
+    score_tensor = torch.zeros_like(compare_list[0]).bool()
+    for i in range(len(compare_list) - 1):
+        temp_score = torch.logical_xor(compare_list[i], compare_list[i+1])
+        score_tensor = torch.logical_or(score_tensor, temp_score)
+
+    prune_num = math.floor(score_tensor.size(0) * prune_prob)
+    common_mask = compare_list[-1].masked_fill(score_tensor, 0.0)
+    already_pruned_num = common_mask.sum().item()
+    dim_to_prune = prune_num - already_pruned_num
+
+    if dim_to_prune > 0:
+        prob = torch.ones_like(compare_list[0]).float().masked_fill(score_tensor.eq(False), 0.0)
+        rest_random_choice = torch.multinomial(prob, dim_to_prune)
+        
+        common_random_mask = common_mask.clone()
+        common_random_mask[rest_random_choice] = 1
+
+        return score_tensor.eq(False).float(), common_random_mask
+    else:
+        return score_tensor.eq(False).float(), common_mask
+
 

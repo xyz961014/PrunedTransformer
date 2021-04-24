@@ -6,6 +6,7 @@ from thumt.utils.scope import scope, get_scope, unique_name
 from thumt.utils.misc import get_global_step, set_global_step
 from thumt.utils.misc import get_global_time, set_global_time
 from thumt.utils.utils import param_in, get_reg_loss, dim_dropout, compute_common_score
+from thumt.utils.utils import choose_common_mask
 from thumt.utils.convert_params import params_to_vec, vec_to_params
 from thumt.utils.head_utils import visualize_head_selection, head_importance_score
 from thumt.utils.head_utils import prune_linear_layer, prune_head_vector, prune_vector
