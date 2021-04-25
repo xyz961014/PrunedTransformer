@@ -508,7 +508,7 @@ def main(args):
         torch.cuda.manual_seed_all(args.seed)
     dllogger.log(step="PARAMETER", data={"SEED": args.seed})
 
-    processor = PROCESSORS[args.task_name]()
+    processor = PROCESSORS[args.task_name.lower()]()
     num_labels = len(processor.get_labels())
 
     #tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
@@ -773,7 +773,7 @@ def main(args):
             )
         if args.do_eval:
             results['eval:loss'] = eval_loss / nb_eval_steps
-            eval_result = compute_metrics(args.task_name, preds, out_label_ids)
+            eval_result = compute_metrics(args.task_name.lower(), preds, out_label_ids)
             results.update(eval_result)
 
     if is_main_process():
