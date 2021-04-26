@@ -126,6 +126,7 @@ CMD+=" $ALL_REDUCE_POST_ACCUMULATION_FP16"
 CMD+=" $INIT_CHECKPOINT"
 CMD+=" --do_train"
 CMD+=" --json-summary ${RESULTS_DIR}/dllogger.json "
+CMD+=" --disable_progress_bar"
 
 CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
 

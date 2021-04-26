@@ -930,7 +930,6 @@ def main(args):
                         if dist.get_rank() == 0:
                             print("Model params after prune")
                         print_variables(model, params.pattern, dist.get_rank() == 0)
-                        params.check_mask_steps = 0
 
                     if common_score >= args.common_score_threshold > 0:
                         # keep common choice and random pick the rest 
@@ -949,7 +948,7 @@ def main(args):
                         if dist.get_rank() == 0:
                             print("Model params after prune")
                         print_variables(model, params.pattern, dist.get_rank() == 0)
-                        params.check_mask_steps = 0
+                        args.common_score_threshold = 0
 
 
                 if not check_mask and step % params.save_checkpoint_steps == 0:
