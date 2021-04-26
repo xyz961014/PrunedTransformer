@@ -244,7 +244,7 @@ def evaluate(model, sorted_key, dataset, base_dir, references, params):
     if dist.get_rank() == 0:
         scalar("BLEU/score - step", score, global_step, write_every_n_steps=1)
         scalar("BLEU/score - time", score, math.floor(global_time), write_every_n_steps=1)
-        print("BLEU at step %d: %f" % (global_step, score))
+        print("BLEU at step %d, training time %d s: %f" % (global_step, math.floor(global_time), score))
 
         # Save checkpoint to save_path
         save({

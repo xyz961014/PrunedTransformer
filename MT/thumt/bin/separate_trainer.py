@@ -761,7 +761,7 @@ def main(args):
             summary.scalar("global_step/sec", t, step)
 
             if counter % params.update_cycle == 0:
-                if hasattr(model, "summary_weights"):
+                if not check_mask and hasattr(model, "summary_weights"):
                     model.summary_weights(summary, step)
 
                 if step > 0 and step % args.log_interval == 0 and dist.get_rank() == 0:
