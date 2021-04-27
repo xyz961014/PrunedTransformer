@@ -713,10 +713,10 @@ def main(args):
     check_binary_masks = []
     check_mask = False
     check_step = 0
+    global_start_time = time.time()
 
     while True:
         start_time = time.time()
-        global_start_time = time.time()
 
         for features in dataset:
             if counter % params.update_cycle == 0:
@@ -808,7 +808,7 @@ def main(args):
 
                     start_time = time.time()
 
-                if check_mask and check_step < params.check_mask_steps and dist.get_rank() == 0:
+                if check_mask and check_step <= params.check_mask_steps and dist.get_rank() == 0:
                     heads_to_prune = model.find_pruneable_heads(args.dim_prune_prob, layerwise=args.layerwise)
                     binary_mask = model.get_binary_head_mask(heads_to_prune)
                     if len(binary_masks) > 0 and binary_masks[-1].size(0) == binary_mask.size(0):
@@ -870,8 +870,9 @@ def main(args):
 
 
                 if not check_mask and step % params.eval_steps == 0:
-                    training_time = time.time() - global_start_time
-                    utils.set_global_time(training_time)
+                    if dist.get_rank() == 0:
+                        training_time = time.time() - global_start_time
+                        utils.set_global_time(training_time)
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
 
@@ -908,13 +909,16 @@ def main(args):
                         pickle.dump([((i + 1) * params.eval_steps, mask.cpu()) 
                                      for i, mask in enumerate(check_binary_masks)], 
                                     open(os.path.join(params.output, "check_masks.pkl"), "wb"))
-                        if len(check_binary_masks) >= args.mask_common and check_binary_masks[-args.mask_common].size(0) == binary_mask.size(0):
-                            compare_list = check_binary_masks[-args.mask_common:]
-                            common_mask, _ = utils.choose_common_mask(compare_list, args.dim_prune_prob)
+                        if len(check_binary_masks) > args.mask_common > 0 and check_binary_masks[-args.mask_common].size(0) == binary_mask.size(0):
+                            common_mask, rest_random_mask = utils.choose_common_mask(compare_list, args.dim_prune_prob)
                             print("common {} Heads:".format(args.mask_common))
                             pprint(model.get_heads_from_mask(common_mask))
                             print("pruned {} Heads:".format(args.mask_common))
                             pprint(model.get_heads_from_mask(binary_mask.masked_fill(common_mask.eq(False), 0)))
+                            with open(os.path.join(params.output, "common_heads.json"), "w") as fp:
+                                json.dump(model.get_heads_from_mask(common_mask), fp)
+                            with open(os.path.join(params.output, "keep_common_random_rest.json"), "w") as fp:
+                                json.dump(model.get_heads_from_mask(rest_random_mask), fp)
 
                     if args.check_and_prune and ((args.dim_prune_interval > 0 and step > 0 and step % args.dim_prune_interval == 0) or step in args.dim_prune_steps):
                         indexes_to_prune = model.find_pruneable_dim(heads_to_prune)
