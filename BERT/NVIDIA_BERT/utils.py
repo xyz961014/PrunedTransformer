@@ -63,3 +63,13 @@ def mkdir_by_main_process(path):
     if is_main_process():
         mkdir(path)
     barrier()
+
+
+def param_in(p, params):
+    for param in params:
+        if id(p) == id(param):
+            return True
+    else:
+        return False
+
+

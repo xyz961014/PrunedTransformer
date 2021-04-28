@@ -43,7 +43,7 @@ from apex.optimizers import FusedLAMB
 from schedulers import PolyWarmUpScheduler
 
 from file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from utils import is_main_process, format_step, get_world_size, get_rank
+from utils import is_main_process, format_step, get_world_size, get_rank, param_in
 from apex.parallel import DistributedDataParallel as DDP
 from schedulers import LinearWarmUpScheduler
 from apex.parallel.distributed import flat_dist_call
@@ -279,6 +279,14 @@ def parse_arguments():
     parser.add_argument('--steps_this_run', type=int, default=-1,
                         help='If provided, only run this many steps before exiting')
 
+    # For Pruning
+    parser.add_argument('--check_mask_interval', type=int, default=100,
+                        help='compute scores for heads every N steps')
+
+    parser.add_argument('--check_mask_steps', type=int, default=200,
+                        help='training steps for weight to get scores for heads')
+
+
     args = parser.parse_args()
     args.fp16 = args.fp16 or args.amp
 
@@ -373,7 +381,7 @@ def prepare_model_and_optimizer(args, device):
             print("resume step from ", args.resume_step)
 
     model.to(device)
-    param_optimizer = list(model.named_parameters())
+    param_optimizer = [(n, p) for n, p in model.named_parameters() if not param_in(p, model.bert.extra_params)]
     no_decay = ['bias', 'gamma', 'beta', 'LayerNorm']
     
     optimizer_grouped_parameters = [
@@ -416,6 +424,8 @@ def prepare_model_and_optimizer(args, device):
             for param, saved_param in zip(amp.master_params(optimizer), checkpoint['master params']):
                 param.data.copy_(saved_param.data)
 
+    import ipdb
+    ipdb.set_trace()
     if args.local_rank != -1:
         if not args.allreduce_post_accumulation:
             model = DDP(model, message_size=250000000, gradient_predivide_factor=get_world_size())
@@ -611,6 +621,8 @@ def main():
                     if training_steps % args.gradient_accumulation_steps == 0:
                         lr_scheduler.step()  # learning rate warmup
                         global_step = take_optimizer_step(args, optimizer, model, overflow_buf, global_step)
+                        import ipdb
+                        ipdb.set_trace()
 
                     if global_step >= args.steps_this_run or timeout_sent:
                         train_time_raw = time.time() - raw_train_start

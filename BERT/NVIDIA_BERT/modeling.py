@@ -372,11 +372,16 @@ class BertSelfAttention(nn.Module):
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
+        self.head_weight = nn.Parameter(torch.zeros(config.num_attention_heads))
+
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+
+        self.extra_params = []
+        self.extra_params.append(self.head_weight)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -412,6 +417,10 @@ class BertSelfAttention(nn.Module):
 
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+
+        weight = torch.sigmoid(self.head_weight)
+        context_layer = torch.einsum("n,blnh->blnh", weight, context_layer)
+
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = torch.reshape(context_layer, new_context_layer_shape)
         return context_layer
@@ -437,6 +446,8 @@ class BertAttention(nn.Module):
         self.self = BertSelfAttention(config)
         self.output = BertSelfOutput(config)
 
+        self.extra_params = self.self.extra_params
+
     def forward(self, input_tensor, attention_mask):
         self_output = self.self(input_tensor, attention_mask)
         attention_output = self.output(self_output, input_tensor)
@@ -446,10 +457,25 @@ class BertAttention(nn.Module):
 class BertIntermediate(nn.Module):
     def __init__(self, config):
         super(BertIntermediate, self).__init__()
+        self.entry = nn.Linear(config.hidden_size, config.hidden_size)
         self.dense_act = LinearActivation(config.hidden_size, config.intermediate_size, act=config.hidden_act)
 
+        self.ffn_input_weight = nn.Parameter(torch.zeros(config.hidden_size))
+        self.ffn_inter_weight = nn.Parameter(torch.zeros(config.intermediate_size))
+
+        self.extra_params = []
+        self.extra_params.append(self.ffn_input_weight)
+        self.extra_params.append(self.ffn_inter_weight)
+
     def forward(self, hidden_states):
+        hidden_states = self.entry(hidden_states)
+        input_weight = torch.sigmoid(self.ffn_input_weight)
+        hidden_states = torch.einsum("d,bld->bld", input_weight, hidden_states)
+
         hidden_states = self.dense_act(hidden_states)
+        inter_weight = torch.sigmoid(self.ffn_inter_weight)
+        hidden_states = torch.einsum("d,bld->bld", inter_weight, hidden_states)
+
         return hidden_states
 
 
@@ -457,12 +483,21 @@ class BertOutput(nn.Module):
     def __init__(self, config):
         super(BertOutput, self).__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.exit = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+
+        self.ffn_output_weight = nn.Parameter(torch.zeros(config.hidden_size))
+
+        self.extra_params = []
+        self.extra_params.append(self.ffn_output_weight)
 
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
+        hidden_states = self.exit(hidden_states)
+        output_weight = torch.sigmoid(self.ffn_output_weight)
+        hidden_states = torch.einsum("d,bld->bld", output_weight, hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
@@ -473,6 +508,8 @@ class BertLayer(nn.Module):
         self.attention = BertAttention(config)
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
+
+        self.extra_params = self.attention.extra_params + self.intermediate.extra_params + self.output.extra_params
 
     def forward(self, hidden_states, attention_mask):
         attention_output = self.attention(hidden_states, attention_mask)
@@ -486,6 +523,10 @@ class BertEncoder(nn.Module):
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.output_all_encoded_layers = config.output_all_encoded_layers
         self._checkpoint_activations = False
+
+        self.extra_params = []
+        for layer in self.layer:
+            self.extra_params += layer.extra_params
 
     @torch.jit.unused
     def checkpointed_forward(self, hidden_states, attention_mask):
@@ -813,6 +854,8 @@ class BertModel(BertPreTrainedModel):
         self.pooler = BertPooler(config)
         self.apply(self.init_bert_weights)
         self.output_all_encoded_layers = config.output_all_encoded_layers
+
+        self.extra_params = self.encoder.extra_params
 
     def forward(self, input_ids, token_type_ids, attention_mask):
         # We create a 3D attention mask from a 2D tensor mask.

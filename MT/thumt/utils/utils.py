@@ -52,7 +52,7 @@ def choose_common_mask(compare_list, prune_prob):
     dim_to_prune = prune_num - already_pruned_num
 
     if dim_to_prune > 0:
-        prob = torch.ones_like(compare_list[0]).float().masked_fill(score_tensor.eq(False), 0.0)
+        prob = torch.ones_like(compare_list[0]).float().masked_fill(score_tensor.eq(False), 1e-10)
         rest_random_choice = torch.multinomial(prob, dim_to_prune)
         
         common_random_mask = common_mask.clone()
