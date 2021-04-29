@@ -611,7 +611,11 @@ def main(args):
                     print(key)
         if args.weight_npy and os.path.exists(args.weight_npy):
             model.load_kappa_weights(args.weight_npy)
-        prune_model(model, optimizer, additional_optimizer, args.prune_json)
+        if args.prune_json:
+            prune_model(model, optimizer, additional_optimizer, args.prune_json)
+            if dist.get_rank() == 0:
+                print("Model params after dim prune")
+                print_variables(model, params.pattern, dist.get_rank() == 0)
         if args.dim_prune_prob and args.dim_prune_interval == 0:
             if model.name == "fit_transformer":
                 model.prune_dim(p=args.dim_prune_prob)
@@ -749,7 +753,7 @@ def main(args):
                 additional_optimizer.apply_gradients(additional_grads_and_vars)
 
             # check mask 
-            if True in additional_flags and check_mask and check_step < params.check_mask_steps:
+            if True in additional_flags and check_mask and check_step <= params.check_mask_steps:
                 additional_grads_and_vars = exclude_variables(
                     additional_flags,
                     zip(gradients, list(model.named_parameters())))

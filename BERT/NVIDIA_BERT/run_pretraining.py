@@ -285,6 +285,10 @@ def parse_arguments():
 
     parser.add_argument('--check_mask_steps', type=int, default=200,
                         help='training steps for weight to get scores for heads')
+    parser.add_argument("--extra_learning_rate",
+                        default=1e-5,
+                        type=float,
+                        help="The initial learning rate for Adam for weights training.")
 
 
     args = parser.parse_args()
@@ -382,6 +386,7 @@ def prepare_model_and_optimizer(args, device):
 
     model.to(device)
     param_optimizer = [(n, p) for n, p in model.named_parameters() if not param_in(p, model.bert.extra_params)]
+    param_extra_optimizer = model.bert.extra_params
     no_decay = ['bias', 'gamma', 'beta', 'LayerNorm']
     
     optimizer_grouped_parameters = [
@@ -390,15 +395,17 @@ def prepare_model_and_optimizer(args, device):
 
     optimizer = FusedLAMB(optimizer_grouped_parameters, 
                           lr=args.learning_rate)
+    extra_optimizer = FusedLAMB(param_extra_optimizer, 
+                                lr=args.extra_learning_rate)
     lr_scheduler = PolyWarmUpScheduler(optimizer, 
                                        warmup=args.warmup_proportion, 
                                        total_steps=args.max_steps)
     if args.fp16:
 
         if args.loss_scale == 0:
-            model, optimizer = amp.initialize(model, optimizer, opt_level="O2", loss_scale="dynamic", cast_model_outputs=torch.float16)
+            model, [optimizer, extra_optimizer] = amp.initialize(model, [optimizer, extra_optimizer], opt_level="O2", loss_scale="dynamic", cast_model_outputs=torch.float16)
         else:
-            model, optimizer = amp.initialize(model, optimizer, opt_level="O2", loss_scale=args.loss_scale, cast_model_outputs=torch.float16)
+            model, [optimizer, extra_optimizer] = amp.initialize(model, [optimizer, extra_optimizer], opt_level="O2", loss_scale=args.loss_scale, cast_model_outputs=torch.float16)
         amp._amp_state.loss_scalers[0]._loss_scale = args.init_loss_scale
 
     model.checkpoint_activations(args.checkpoint_activations)
@@ -424,8 +431,6 @@ def prepare_model_and_optimizer(args, device):
             for param, saved_param in zip(amp.master_params(optimizer), checkpoint['master params']):
                 param.data.copy_(saved_param.data)
 
-    import ipdb
-    ipdb.set_trace()
     if args.local_rank != -1:
         if not args.allreduce_post_accumulation:
             model = DDP(model, message_size=250000000, gradient_predivide_factor=get_world_size())
@@ -436,7 +441,7 @@ def prepare_model_and_optimizer(args, device):
 
     criterion = BertPretrainingCriterion(config.vocab_size)
 
-    return model, optimizer, lr_scheduler, checkpoint, global_step, criterion
+    return model, optimizer, extra_optimizer, lr_scheduler, checkpoint, global_step, criterion
 
 def take_optimizer_step(args, optimizer, model, overflow_buf, global_step):
 
@@ -513,7 +518,7 @@ def main():
     dllogger.log(step="PARAMETER", data={"Config": [str(args)]})
 
     # Prepare optimizer
-    model, optimizer, lr_scheduler, checkpoint, global_step, criterion = prepare_model_and_optimizer(args, device)
+    model, optimizer, extra_optimizer, lr_scheduler, checkpoint, global_step, criterion = prepare_model_and_optimizer(args, device)
 
     if is_main_process():
         dllogger.log(step="PARAMETER", data={"SEED": args.seed})
@@ -530,6 +535,8 @@ def main():
         average_loss = 0.0  # averaged loss every args.log_freq steps
         epoch = 0
         training_steps = 0
+        check_mask = False
+        check_mask_step = 0
 
         pool = ProcessPoolExecutor(1)
 
@@ -597,7 +604,10 @@ def main():
                     raw_train_start = time.time()
                 for step, batch in enumerate(train_iter):
 
-                    training_steps += 1
+                    if check_mask:
+                        check_mask_step += 1
+                    else:
+                        training_steps += 1
                     batch = [t.to(device) for t in batch]
                     input_ids, segment_ids, input_mask, masked_lm_labels, next_sentence_labels = batch
                     prediction_scores, seq_relationship_score = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
@@ -612,17 +622,27 @@ def main():
                             loss = loss / args.gradient_accumulation_steps
                             divisor = 1.0
                     if args.fp16:
-                        with amp.scale_loss(loss, optimizer, delay_overflow_check=args.allreduce_post_accumulation) as scaled_loss:
+                        with amp.scale_loss(loss, [optimizer, extra_optimizer], delay_overflow_check=args.allreduce_post_accumulation) as scaled_loss:
                             scaled_loss.backward()
                     else:
                         loss.backward()
                     average_loss += loss.item()
 
-                    if training_steps % args.gradient_accumulation_steps == 0:
+                    if check_mask and check_mask_step <= args.check_mask_steps:
+                        take_optimizer_step(args, extra_optimizer, model, overflow_buf, check_mask_step)
+                        if is_main_process() and check_mask_step % args.log_freq == 0:
+                            dllogger.log(step="PARAMETER", data={"check_mask_step": check_mask_step, 
+                                                                 "step_loss": loss.item()})
+
+                    if not check_mask and training_steps % args.gradient_accumulation_steps == 0:
                         lr_scheduler.step()  # learning rate warmup
                         global_step = take_optimizer_step(args, optimizer, model, overflow_buf, global_step)
-                        import ipdb
-                        ipdb.set_trace()
+
+                    if not check_mask and args.check_mask_steps > 0 and training_steps % (args.check_mask_interval * args.gradient_accumulation_steps) == 0:
+                        model.bert.reinitialize_weights()
+                        check_mask = True
+
+
 
                     if global_step >= args.steps_this_run or timeout_sent:
                         train_time_raw = time.time() - raw_train_start
@@ -637,16 +657,20 @@ def main():
                         if is_main_process():
                             dllogger.log(step=(epoch, global_step, ), data={"final_loss": final_loss})
                     elif training_steps % (args.log_freq * args.gradient_accumulation_steps) == 0:
-                        if is_main_process():
+                        if is_main_process() and not check_mask:
                             dllogger.log(step=(epoch, global_step, ), data={"average_loss": average_loss / (args.log_freq * divisor),
                                                                             "step_loss": loss.item() * args.gradient_accumulation_steps / divisor,
                                                                             "learning_rate": optimizer.param_groups[0]['lr']})
                         average_loss = 0
 
+                    if check_mask_step > 0 and check_mask_step == args.check_mask_steps:
+                        check_mask_step = 0
+                        check_mask = False
+                        # check and prune
 
                     if global_step >= args.steps_this_run or training_steps % (
                             args.num_steps_per_checkpoint * args.gradient_accumulation_steps) == 0 or timeout_sent:
-                        if is_main_process() and not args.skip_checkpoint:
+                        if is_main_process() and not args.skip_checkpoint and not check_mask:
                             # Save a trained model
                             dllogger.log(step="PARAMETER", data={"checkpoint_step": global_step})
                             model_to_save = model.module if hasattr(model,

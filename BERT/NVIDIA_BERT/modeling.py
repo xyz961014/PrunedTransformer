@@ -857,6 +857,9 @@ class BertModel(BertPreTrainedModel):
 
         self.extra_params = self.encoder.extra_params
 
+    def reinitialize_weights(self):
+        pass
+
     def forward(self, input_ids, token_type_ids, attention_mask):
         # We create a 3D attention mask from a 2D tensor mask.
         # Sizes are [batch_size, 1, 1, to_seq_length]
