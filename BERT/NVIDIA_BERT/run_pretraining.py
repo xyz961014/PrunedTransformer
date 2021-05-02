@@ -26,7 +26,9 @@ import os
 import time
 import argparse
 import random
+import copy
 import h5py
+import socket
 from tqdm import tqdm, trange
 import os
 import numpy as np
@@ -200,6 +202,10 @@ def parse_arguments():
                         type=int,
                         default=os.getenv('LOCAL_RANK', -1),
                         help="local_rank for distributed training on gpus")
+    parser.add_argument("--world_size",
+                        type=int,
+                        default=1,
+                        help="num of all gpus")
     parser.add_argument('--seed',
                         type=int,
                         default=42,
@@ -312,7 +318,9 @@ def setup_training(args):
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        torch.distributed.init_process_group(backend='nccl', init_method='env://')
+        torch.distributed.init_process_group(backend='nccl', init_method=args.url,
+                                             rank=args.local_rank,
+                                             world_size=args.world_size)
         args.n_gpu = 1
         
     if args.gradient_accumulation_steps == 1:
@@ -503,11 +511,9 @@ def take_optimizer_step(args, optimizer, model, overflow_buf, global_step):
 
     return global_step
 
-def main():
+def main(args):
     global timeout_sent
 
-    args = parse_arguments()
-        
     random.seed(args.seed + args.local_rank)
     np.random.seed(args.seed + args.local_rank)
     torch.manual_seed(args.seed + args.local_rank)
@@ -697,7 +703,7 @@ def main():
                         if global_step >= args.steps_this_run or timeout_sent:
                             del train_dataloader
                             # thread.join()
-                            return args, final_loss, train_time_raw, global_step
+                            return final_loss, train_time_raw, global_step
 
                 del train_dataloader
                 # thread.join()
@@ -707,11 +713,27 @@ def main():
 
             epoch += 1
 
+# Wrap main function
+def process_fn(rank, args):
+    local_args = copy.copy(args)
+    local_args.local_rank = rank
+    main(local_args)
+
 
 if __name__ == "__main__":
 
+    parse_args = parse_arguments()
     now = time.time()
-    args, final_loss, train_time_raw, global_step = main()
+
+    with socket.socket() as s:
+        s.bind(("localhost", 0))
+        port = s.getsockname()[1]
+        url = "tcp://localhost:" + str(port)
+        parse_args.url = url
+
+    torch.multiprocessing.spawn(process_fn, args=(parse_args,), nprocs=parse_args.world_size)
+        
+    final_loss, train_time_raw, global_step = main(args)
     gpu_count = args.n_gpu
     global_step += args.phase1_end_step if (args.phase2 and args.resume_step > 0) else 0
     if args.resume_step == -1:

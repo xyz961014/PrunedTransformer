@@ -15,7 +15,7 @@
 
 
 echo "Container nvidia build = " $NVIDIA_BUILD_ID
-train_batch_size=${1:-16}
+train_batch_size=${1:-8}
 learning_rate=${2:-"6e-3"}
 precision=${3:-"fp16"}
 num_gpus=${4:-1}
@@ -30,7 +30,7 @@ seed=${12:-12439}
 job_name=${13:-"bert_lamb_pretraining"}
 allreduce_post_accumulation=${14:-"true"}
 allreduce_post_accumulation_fp16=${15:-"true"}
-train_batch_size_phase2=${16:-16}
+train_batch_size_phase2=${16:-8}
 learning_rate_phase2=${17:-"4e-3"}
 warmup_proportion_phase2=${18:-"0.128"}
 train_steps_phase2=${19:-100}
