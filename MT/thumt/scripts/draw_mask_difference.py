@@ -32,7 +32,7 @@ def parse_args():
         usage="draw_mask_difference.py [<args>] [-h | --help]"
     )
 
-    parser.add_argument("--checkpoint", type=str, required=True,
+    parser.add_argument("--checkpoints", type=str, nargs="+", required=True,
                         help="Path to trained checkpoints.")
     parser.add_argument("--common_n", type=int, default=5,
                         help="stat common heads in n checkpoint")
@@ -78,7 +78,7 @@ def compute_common_score(compare_list):
 def main(args):
 
     if not args.env:
-        env_name = re.sub("-|/", "", args.checkpoint)
+        env_name = re.sub("-|/", "", args.checkpoints[0])
     else:
         env_name = args.env
 
@@ -86,8 +86,14 @@ def main(args):
     vis = visdom.Visdom(env=env_name)
     assert vis.check_connection()
 
-    masks = pickle.load(open(args.checkpoint, "rb"))
-    distance_matrix = compute_distance_matrix(masks)
+    distance_matrixs = []
+    for ckp in args.checkpoints:
+        masks = pickle.load(open(ckp, "rb"))
+        distance_matrix = compute_distance_matrix(masks)
+        distance_matrixs.append(distance_matrix.unsqueeze(0))
+
+    distance_matrix = torch.cat(distance_matrixs, dim=0).mean(dim=0)
+
 
     opts = {
             "title": "Visualization of mask distance matrix",
@@ -96,22 +102,22 @@ def main(args):
            }
     vis.heatmap(distance_matrix, opts=opts)
 
-    steps = np.array([m[0] for m in masks])
-    mask_diffs = np.array([compute_mask_difference(masks, i) for i in range(len(masks))])
-    common_n_values = np.array([compute_common_n_value(masks, args.common_n, i) for i in range(len(masks))])
+    #steps = np.array([m[0] for m in masks])
+    #mask_diffs = np.array([compute_mask_difference(masks, i) for i in range(len(masks))])
+    #common_n_values = np.array([compute_common_n_value(masks, args.common_n, i) for i in range(len(masks))])
 
-    opts_diff = {
-            "title": "Neighbor mask differences",
-            "xlabel": "Steps",
-            "ylabel": "Score"
-           }
-    opts_common = {
-            "title": "recent {} masks shared heads".format(args.common_n),
-            "xlabel": "Steps",
-            "ylabel": "Heads"
-           }
-    vis.line(mask_diffs[1:], steps[1:], opts=opts_diff)
-    vis.line(common_n_values[args.common_n:], steps[args.common_n:], opts=opts_common)
+    #opts_diff = {
+    #        "title": "Neighbor mask differences",
+    #        "xlabel": "Steps",
+    #        "ylabel": "Score"
+    #       }
+    #opts_common = {
+    #        "title": "recent {} masks shared heads".format(args.common_n),
+    #        "xlabel": "Steps",
+    #        "ylabel": "Heads"
+    #       }
+    #vis.line(mask_diffs[1:], steps[1:], opts=opts_diff)
+    #vis.line(common_n_values[args.common_n:], steps[args.common_n:], opts=opts_common)
     
 
 

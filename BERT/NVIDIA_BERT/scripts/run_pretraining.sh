@@ -128,7 +128,7 @@ CMD+=" --do_train"
 CMD+=" --json-summary ${RESULTS_DIR}/dllogger.json "
 CMD+=" --disable_progress_bar"
 
-CMD="python3 -m torch.distributed.launch --nproc_per_node=$num_gpus $CMD"
+CMD="python3 $CMD --world_size $num_gpus"
 
 
 if [ "$create_logfile" = "true" ] ; then
