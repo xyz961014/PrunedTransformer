@@ -449,6 +449,7 @@ def main(args):
         return state
 
     counter = 0
+    global_start_time = time.time()
 
     while True:
         start_time = time.time()
@@ -499,6 +500,9 @@ def main(args):
                     return
 
                 if step % params.eval_steps == 0:
+                    if dist.get_rank() == 0:
+                        training_time = time.time() - global_start_time
+                        utils.set_global_time(training_time)
                     utils.evaluate(model, sorted_key, eval_dataset,
                                    params.output, references, params)
                     start_time = time.time()
