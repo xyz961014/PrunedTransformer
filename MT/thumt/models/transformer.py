@@ -458,7 +458,7 @@ class Transformer(modules.Module):
         params.hidden_size = 64
         params.filter_size = 256
         params.num_heads = 4
-        head_size = 16
+        params.head_size = 16
         params.residual_dropout = 0.0
         params.learning_rate = 5e-4
         params.train_steps = 100000

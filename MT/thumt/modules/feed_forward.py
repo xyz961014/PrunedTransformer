@@ -255,6 +255,11 @@ class PickyFeedForward(Module):
                 self.compute_weight = lambda x: F.softmax(x, 0) - F.softmax(x, 0).detach() + torch.ones_like(x)
             else:
                 self.compute_weight = lambda x: F.softmax(x, dim=0)
+        elif weight_function == "relu":
+            if fake_weight:
+                self.compute_weight = lambda x: torch.relu(x) - torch.relu(x).detach() + torch.ones_like(x)
+            else:
+                self.compute_weight = torch.relu
 
 
         with utils.scope(name):

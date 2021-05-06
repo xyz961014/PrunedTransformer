@@ -250,12 +250,22 @@ class PickyTransformerEncoderLayer(modules.Module):
                     self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
                     self.add_name(self.ffn_output_weight, "ffn_output_weight")
                     self.additional_params.append(self.ffn_output_weight)
-                nn.init.constant_(self.ffn_input_weight, 0.0)
-                nn.init.constant_(self.ffn_inter_weight, 0.0)
+                if params.weight_function.lower() == "relu":
+                    nn.init.constant_(self.ffn_input_weight, 1.0)
+                    nn.init.constant_(self.ffn_inter_weight, 1.0)
+                else:
+                    nn.init.constant_(self.ffn_input_weight, 0.0)
+                    nn.init.constant_(self.ffn_inter_weight, 0.0)
                 if params.ffn_thin_output:
-                    nn.init.constant_(self.ffn_output_weight, 0.0)
+                    if params.weight_function.lower() == "relu":
+                        nn.init.constant_(self.ffn_output_weight, 1.0)
+                    else:
+                        nn.init.constant_(self.ffn_output_weight, 0.0)
 
-        nn.init.constant_(self.kappa, 0.0)
+        if params.weight_function.lower() == "relu":
+            nn.init.constant_(self.kappa, 1.0)
+        else:
+            nn.init.constant_(self.kappa, 0.0)
     
     def load_additional_params(self):
         additional_params_dict = dict()
@@ -391,13 +401,25 @@ class PickyTransformerDecoderLayer(modules.Module):
                     self.ffn_output_weight = nn.Parameter(torch.empty(params.hidden_size))
                     self.add_name(self.ffn_output_weight, "ffn_output_weight")
                     self.additional_params.append(self.ffn_output_weight)
-                nn.init.constant_(self.ffn_input_weight, 0.0)
-                nn.init.constant_(self.ffn_inter_weight, 0.0)
-                if params.ffn_thin_output:
-                    nn.init.constant_(self.ffn_output_weight, 0.0)
 
-        nn.init.constant_(self.self_kappa, 0.0)
-        nn.init.constant_(self.encdec_kappa, 0.0)
+                if params.weight_function.lower() == "relu":
+                    nn.init.constant_(self.ffn_input_weight, 1.0)
+                    nn.init.constant_(self.ffn_inter_weight, 1.0)
+                else:
+                    nn.init.constant_(self.ffn_input_weight, 0.0)
+                    nn.init.constant_(self.ffn_inter_weight, 0.0)
+                if params.ffn_thin_output:
+                    if params.weight_function.lower() == "relu":
+                        nn.init.constant_(self.ffn_output_weight, 1.0)
+                    else:
+                        nn.init.constant_(self.ffn_output_weight, 0.0)
+
+        if params.weight_function.lower() == "relu":
+            nn.init.constant_(self.self_kappa, 1.0)
+            nn.init.constant_(self.encdec_kappa, 1.0)
+        else:
+            nn.init.constant_(self.self_kappa, 0.0)
+            nn.init.constant_(self.encdec_kappa, 0.0)
 
     def load_additional_params(self):
         self_additional_params_dict = dict()

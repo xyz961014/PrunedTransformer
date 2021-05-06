@@ -601,12 +601,12 @@ def main(args):
         missing_keys, unexpected_keys = model.load_state_dict(state["model"], strict=False)
         if len(missing_keys) > 0:
             if dist.get_rank() == 0:
-                print("Missing Key(s) in state_dict: ", end="")
+                print("Missing Key(s) in state_dict: ")
                 for key in missing_keys:
                     print(key)
         if len(unexpected_keys) > 0:
             if dist.get_rank() == 0:
-                print("Unexpected Key(s) in state_dict: ", end="")
+                print("Unexpected Key(s) in state_dict: ")
                 for key in unexpected_keys:
                     print(key)
         if args.weight_npy and os.path.exists(args.weight_npy):
