@@ -328,13 +328,15 @@ class PickyTransformerEncoderLayer(modules.Module):
                 self.reinit_ffn_weights(index)
 
     def reinit_kappa(self, heads=None):
+        value = 1.0
         if heads is not None:
             remain_heads = utils.reverse_select(heads, self.kappa.size(0))
         else:
             remain_heads = []
-        reinit_vector_(self.kappa, remain_heads)
+        reinit_vector_(self.kappa, remain_heads, value)
 
     def reinit_ffn_weights(self, index=None):
+        value = 1.0
         if self.ffn_weights:
             if index is not None:
                 input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
@@ -343,14 +345,14 @@ class PickyTransformerEncoderLayer(modules.Module):
                 input_index = []
                 inter_index = []
 
-            reinit_vector_(self.ffn_input_weight, input_index)
-            reinit_vector_(self.ffn_inter_weight, inter_index)
+            reinit_vector_(self.ffn_input_weight, input_index, value)
+            reinit_vector_(self.ffn_inter_weight, inter_index, value)
             if self.feed_forward.thin_output:
                 if index is not None:
                     output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
                 else:
                     output_index = []
-                reinit_vector_(self.ffn_output_weight, output_index)
+                reinit_vector_(self.ffn_output_weight, output_index, value)
 
     def forward(self, x, bias):
         self.load_additional_params()
@@ -502,20 +504,23 @@ class PickyTransformerDecoderLayer(modules.Module):
                 self.reinit_ffn_weights(index)
 
     def reinit_self_kappa(self, heads=None):
+        value = 1.0
         if heads is not None:
             remain_heads = utils.reverse_select(heads, self.self_kappa.size(0))
         else:
             remain_heads = []
-        reinit_vector_(self.self_kappa, remain_heads)
+        reinit_vector_(self.self_kappa, remain_heads, value)
 
     def reinit_encdec_kappa(self, heads=None):
+        value = 1.0
         if heads is not None:
             remain_heads = utils.reverse_select(heads, self.encdec_kappa.size(0))
         else:
             remain_heads = []
-        reinit_vector_(self.encdec_kappa, remain_heads)
+        reinit_vector_(self.encdec_kappa, remain_heads, value)
 
     def reinit_ffn_weights(self, index=None):
+        value = 1.0
         if self.ffn_weights:
             if index is not None:
                 input_index = utils.reverse_select(index["input"], self.ffn_input_weight.size(0))
@@ -524,14 +529,14 @@ class PickyTransformerDecoderLayer(modules.Module):
                 input_index = []
                 inter_index = []
 
-            reinit_vector_(self.ffn_input_weight, input_index)
-            reinit_vector_(self.ffn_inter_weight, inter_index)
+            reinit_vector_(self.ffn_input_weight, input_index, value)
+            reinit_vector_(self.ffn_inter_weight, inter_index, value)
             if self.feed_forward.thin_output:
                 if index is not None:
                     output_index = utils.reverse_select(index["output"], self.ffn_output_weight.size(0))
                 else:
                     output_index = []
-                reinit_vector_(self.ffn_output_weight, output_index)
+                reinit_vector_(self.ffn_output_weight, output_index, value)
 
     def __call__(self, x, attn_bias, encdec_bias, memory, state=None):
         self.load_additional_params()

@@ -65,14 +65,14 @@ def reinit_linear_layer(layer, index, dim):
         layer.bias.requires_grad = True
     return layer
 
-def reinit_vector_(vector, index):
+def reinit_vector_(vector, index, value=0.0):
     # initialize wherever not in index with 0
     if not isinstance(index, torch.Tensor):
         index = torch.Tensor(index).long()
     reverse_index = reverse_select(index, vector.size(0))
     reverse_index = torch.Tensor(reverse_index).long()
     vector.requires_grad = False
-    vector = vector.index_fill_(0, reverse_index, 0.0)
+    vector = vector.index_fill_(0, reverse_index, value)
     vector.requires_grad = True
 
 def visualize_head_selection(model, pattern, func=None, env=None, step=None):
